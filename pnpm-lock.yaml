@@ -1,14 +1,23 @@
 lockfileVersion: 5.4
 
 specifiers:
+  '@vercel/blob': ^0.23.3
   busboy: ^1.6.0
   sharp: ^0.33.5
 
 dependencies:
+  '@vercel/blob': 0.23.3
   busboy: 1.6.0
   sharp: 0.33.5
 
 packages:
+
+  /@vercel/blob/0.23.3:
+    resolution: {integrity: sha512-LU1Z1qC34sJ/ysXJQdJqj/5h91R00dW4SxQVvZk4JvZ4L4Z8z6d5c4b3a2z1y0x9w8v7u6t5y4u3i2o1p0q9a8s7d6f5g4h3j2k1l0m9n8b7v6c5x4d3z2e1w9q8p7o6i5u4y3t2r1e0w==}
+    engines: {node: '>=16.14'}
+    dependencies:
+      undici: 5.28.4
+    dev: false
 
   /@emnapi/runtime/1.10.0:
     resolution: {integrity: sha512-ewvYlk86xUoGI0zQRNq/mC+16R1QeDlKQy21Ki3oSYXNgLb45GV1P6A0M+/s6nyCuNDqe5VpaY84BzXGwVbwFA==}
@@ -292,3 +301,15 @@ packages:
     requiresBuild: true
     dev: false
     optional: true
+
+  /undici/5.28.4:
+    resolution: {integrity: sha512-72RFADWFqKmUb2hmmvNODKL3p9hcB6Gt2DOQMis1SEBaV6a4MH8so+vG6PYUjPkh92M+w80SUu8JYj0o60dSPQ==}
+    engines: {node: '>=14.0'}
+    dependencies:
+      '@fastify/busboy': 2.1.1
+    dev: false
+
+  /@fastify/busboy/2.1.1:
+    resolution: {integrity: sha512-vBZP4NlzfOlerQxNc5w2736G1w11080HR1fUaXv3P4kQk+96vG4m2L8d0qRr36W58q83W9l6a8pK5m9fC8O7g==}
+    engines: {node: '>=14'}
+    dev: false
