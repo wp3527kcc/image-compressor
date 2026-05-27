@@ -1,23 +1,16 @@
 lockfileVersion: 5.4
 
 specifiers:
-  '@vercel/blob': ^0.23.3
+  '@vercel/blob': ^0.23.4
   busboy: ^1.6.0
   sharp: ^0.33.5
 
 dependencies:
-  '@vercel/blob': 0.23.3
+  '@vercel/blob': 0.23.4
   busboy: 1.6.0
   sharp: 0.33.5
 
 packages:
-
-  /@vercel/blob/0.23.3:
-    resolution: {integrity: sha512-LU1Z1qC34sJ/ysXJQdJqj/5h91R00dW4SxQVvZk4JvZ4L4Z8z6d5c4b3a2z1y0x9w8v7u6t5y4u3i2o1p0q9a8s7d6f5g4h3j2k1l0m9n8b7v6c5x4d3z2e1w9q8p7o6i5u4y3t2r1e0w==}
-    engines: {node: '>=16.14'}
-    dependencies:
-      undici: 5.28.4
-    dev: false
 
   /@emnapi/runtime/1.10.0:
     resolution: {integrity: sha512-ewvYlk86xUoGI0zQRNq/mC+16R1QeDlKQy21Ki3oSYXNgLb45GV1P6A0M+/s6nyCuNDqe5VpaY84BzXGwVbwFA==}
@@ -26,6 +19,11 @@ packages:
       tslib: 2.8.1
     dev: false
     optional: true
+
+  /@fastify/busboy/2.1.1:
+    resolution: {integrity: sha512-vBZP4NlzfOlerQTnba4aqZoMhE/a9HY7HRqoOPaETQcSQuWEIyZMHGfVu6w9wGtGK5fED5qRs2DteVCjOH60sA==}
+    engines: {node: '>=14'}
+    dev: false
 
   /@img/sharp-darwin-arm64/0.33.5:
     resolution: {integrity: sha512-UT4p+iz/2H4twwAoLCqfA9UH5pI6DggwKEGuaPy7nCVQ8ZsiY5PIcrRvD1DzuY3qYL07NtIQcWnBSY/heikIFQ==}
@@ -207,11 +205,33 @@ packages:
     dev: false
     optional: true
 
+  /@vercel/blob/0.23.4:
+    resolution: {integrity: sha512-cOU2e01RWZXFyc/OVRq+zZg38m34bcxpQk5insKp3Td9akNWThrXiF2URFHpRlm4fbaQ/l7pPSOB5nkLq+t6pw==}
+    engines: {node: '>=16.14'}
+    dependencies:
+      async-retry: 1.3.3
+      bytes: 3.1.2
+      is-buffer: 2.0.5
+      is-plain-object: 5.0.0
+      undici: 5.29.0
+    dev: false
+
+  /async-retry/1.3.3:
+    resolution: {integrity: sha512-wfr/jstw9xNi/0teMHrRW7dsz3Lt5ARhYNZ2ewpadnhaIp5mbALhOAP+EAdsC7t4Z6wqsDVv9+W6gm1Dk9mEyw==}
+    dependencies:
+      retry: 0.13.1
+    dev: false
+
   /busboy/1.6.0:
     resolution: {integrity: sha512-8SFQbg/0hQ9xy3UNTB0YEnsNBbWfhf7RtnzpL7TkBiTBRfrQ9Fxcnz7VJsleJpyp6rVLvXiuORqjlHi5q+PYuA==}
     engines: {node: '>=10.16.0'}
     dependencies:
       streamsearch: 1.1.0
+    dev: false
+
+  /bytes/3.1.2:
+    resolution: {integrity: sha512-/Nf7TyzTx6S3yRJObOAV7956r8cr2+Oj8AC5dt8wSP3BQAoeX58NoHyCU8P8zGkNXStjTSi6fzO6F0pBdcYbEg==}
+    engines: {node: '>= 0.8'}
     dev: false
 
   /color-convert/2.0.1:
@@ -247,6 +267,21 @@ packages:
 
   /is-arrayish/0.3.4:
     resolution: {integrity: sha512-m6UrgzFVUYawGBh1dUsWR5M2Clqic9RVXC/9f8ceNlv2IcO9j9J/z8UoCLPqtsPBFNzEpfR3xftohbfqDx8EQA==}
+    dev: false
+
+  /is-buffer/2.0.5:
+    resolution: {integrity: sha512-i2R6zNFDwgEHJyQUtJEk0XFi1i0dPFn/oqjK3/vPCcDeJvW5NQ83V8QbicfF1SupOaB0h8ntgBC2YiE7dfyctQ==}
+    engines: {node: '>=4'}
+    dev: false
+
+  /is-plain-object/5.0.0:
+    resolution: {integrity: sha512-VRSzKkbMm5jMDoKLbltAkFQ5Qr7VDiTFGXxYFXXowVj387GeGNOCsOH6Msy00SGZ3Fp84b1Naa1psqgcCIEP5Q==}
+    engines: {node: '>=0.10.0'}
+    dev: false
+
+  /retry/0.13.1:
+    resolution: {integrity: sha512-XQBQ3I8W1Cge0Seh+6gjj03LbmRFWuoszgK9ooCpwYIrhhoO80pfq4cUkU5DkknwfOfFteRwlZ56PYOGYyFWdg==}
+    engines: {node: '>= 4'}
     dev: false
 
   /semver/7.8.1:
@@ -302,14 +337,9 @@ packages:
     dev: false
     optional: true
 
-  /undici/5.28.4:
-    resolution: {integrity: sha512-72RFADWFqKmUb2hmmvNODKL3p9hcB6Gt2DOQMis1SEBaV6a4MH8so+vG6PYUjPkh92M+w80SUu8JYj0o60dSPQ==}
+  /undici/5.29.0:
+    resolution: {integrity: sha512-raqeBD6NQK4SkWhQzeYKd1KmIG6dllBOTt55Rmkt4HtI9mwdWtJljnrXjAFUBLTSN67HWrOIZ3EPF4kjUw80Bg==}
     engines: {node: '>=14.0'}
     dependencies:
       '@fastify/busboy': 2.1.1
-    dev: false
-
-  /@fastify/busboy/2.1.1:
-    resolution: {integrity: sha512-vBZP4NlzfOlerQxNc5w2736G1w11080HR1fUaXv3P4kQk+96vG4m2L8d0qRr36W58q83W9l6a8pK5m9fC8O7g==}
-    engines: {node: '>=14'}
     dev: false
