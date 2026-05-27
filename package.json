@@ -1,0 +1,14 @@
+{
+  "name": "image-compressor",
+  "version": "2.0.0",
+  "description": "图片压缩及转码 WebP 格式工具 - 支持 Vercel 部署",
+  "scripts": {
+    "dev": "node dev-server.js",
+    "start": "node dev-server.js",
+    "deploy": "vercel"
+  },
+  "dependencies": {
+    "busboy": "^1.6.0",
+    "sharp": "^0.33.5"
+  }
+}
