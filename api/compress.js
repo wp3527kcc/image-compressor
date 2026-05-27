@@ -103,12 +103,8 @@ function appendRecord(markdownContent, record) {
 
 // 保存记录到 Vercel Blob
 async function saveRecords(content) {
-  try {
-    await put(RECORD_FILE, content, { access: 'public' });
-    console.log('记录保存成功');
-  } catch (error) {
-    console.error('保存记录失败:', error);
-  }
+  await put(RECORD_FILE, content, { access: 'public' });
+  console.log('记录保存成功');
 }
 
 // 主处理函数
@@ -170,18 +166,17 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    // 保存记录（不阻塞响应）
-    (async () => {
-      try {
-        let content = await readRecords();
-        for (const record of recordsToSave) {
-          content = appendRecord(content, record);
-        }
-        await saveRecords(content);
-      } catch (error) {
-        console.error('保存记录过程出错:', error);
+    // 在 Serverless 环境中，必须在响应发送前完成记录保存
+    try {
+      let content = await readRecords();
+      for (const record of recordsToSave) {
+        content = appendRecord(content, record);
       }
-    })();
+      await saveRecords(content);
+    } catch (error) {
+      console.error('保存记录过程出错:', error);
+      // 记录保存失败不影响用户体验，继续返回压缩结果
+    }
 
     res.status(200).json({ success: true, results });
   } catch (error) {
