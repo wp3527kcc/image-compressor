@@ -109,13 +109,58 @@
       cursor: pointer;
     }
 
-    .controls select {
+    .format-options {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
       flex: 1;
-      padding: 8px 10px;
+    }
+
+    .format-option {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 12px;
       border: 1px solid #d1d5db;
-      border-radius: 6px;
+      border-radius: 999px;
       background: #fff;
       color: #374151;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-size: 0.85rem;
+    }
+
+    .format-option:has(input:checked) {
+      border-color: #667eea;
+      background: #eef2ff;
+      color: #4f46e5;
+      font-weight: 600;
+    }
+
+    .format-option input {
+      accent-color: #667eea;
+    }
+
+    .results-toolbar {
+      display: none;
+      justify-content: flex-end;
+      margin-top: 24px;
+      margin-bottom: -12px;
+    }
+
+    .results-toolbar.active {
+      display: flex;
+    }
+
+    .btn-secondary {
+      background: #111827;
+      color: #fff;
+      padding: 10px 18px;
+      font-size: 0.9rem;
+    }
+
+    .btn-secondary:hover {
+      background: #374151;
     }
 
     .quality-value {
@@ -341,12 +386,12 @@
         </div>
         <div class="control-row">
           <label>图片输出格式：</label>
-          <select id="imageFormat">
-            <option value="webp">WebP</option>
-            <option value="jpeg">JPEG</option>
-            <option value="png">PNG</option>
-            <option value="avif">AVIF</option>
-          </select>
+          <div class="format-options" id="imageFormatOptions">
+            <label class="format-option"><input type="radio" name="imageFormat" value="webp" checked>WebP</label>
+            <label class="format-option"><input type="radio" name="imageFormat" value="jpeg">JPEG</label>
+            <label class="format-option"><input type="radio" name="imageFormat" value="png">PNG</label>
+            <label class="format-option"><input type="radio" name="imageFormat" value="avif">AVIF</label>
+          </div>
         </div>
       </div>
 
@@ -361,6 +406,9 @@
 
       <div class="error" id="error"></div>
 
+      <div class="results-toolbar" id="resultsToolbar">
+        <button class="btn btn-secondary" id="downloadAllBtn" type="button">下载所有</button>
+      </div>
       <div class="results" id="results"></div>
     </div>
   </div>
@@ -374,14 +422,16 @@
     const previewGrid = document.getElementById('previewGrid');
     const qualitySlider = document.getElementById('quality');
     const qualityValue = document.getElementById('qualityValue');
-    const imageFormatSelect = document.getElementById('imageFormat');
     const compressBtn = document.getElementById('compressBtn');
     const loading = document.getElementById('loading');
     const loadingText = loading.querySelector('p');
     const errorEl = document.getElementById('error');
+    const resultsToolbar = document.getElementById('resultsToolbar');
+    const downloadAllBtn = document.getElementById('downloadAllBtn');
     const resultsEl = document.getElementById('results');
 
     let selectedFiles = [];
+    let latestResults = [];
 
     qualitySlider.addEventListener('input', () => {
       qualityValue.textContent = qualitySlider.value + '%';
@@ -453,6 +503,37 @@
       return `uploads/${Date.now()}-${Math.random().toString(36).slice(2)}-${sanitizePathSegment(file.name)}`;
     }
 
+    function getSelectedImageFormat() {
+      return document.querySelector('input[name="imageFormat"]:checked')?.value || 'webp';
+    }
+
+    function downloadFile(url, filename, index = 0) {
+      setTimeout(() => {
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        link.target = '_blank';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      }, index * 250);
+    }
+
+    function downloadResult(index) {
+      const result = latestResults[index];
+      if (!result) return;
+      downloadFile(result.downloadUrl || result.url, result.outputFilename);
+    }
+
+    function downloadAllResults() {
+      latestResults.forEach((result, index) => {
+        downloadFile(result.downloadUrl || result.url, result.outputFilename, index);
+      });
+    }
+
+    window.downloadResult = downloadResult;
+    downloadAllBtn.addEventListener('click', downloadAllResults);
+
     function renderFileList() {
       fileList.innerHTML = selectedFiles.map((file, i) => `
         <div class="file-item">
@@ -506,6 +587,8 @@
       loading.classList.add('active');
       errorEl.style.display = 'none';
       resultsEl.innerHTML = '';
+      latestResults = [];
+      resultsToolbar.classList.remove('active');
       compressBtn.disabled = true;
 
       try {
@@ -516,7 +599,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             quality: qualitySlider.value,
-            imageFormat: imageFormatSelect.value,
+            imageFormat: getSelectedImageFormat(),
             files: uploadedFiles,
           }),
         });
@@ -538,7 +621,9 @@
     });
 
     function renderResults(results) {
-      resultsEl.innerHTML = results.map(r => {
+      latestResults = results;
+      resultsToolbar.classList.toggle('active', results.length > 0);
+      resultsEl.innerHTML = results.map((r, index) => {
         const dimensions = r.mediaType === 'image' ? `&nbsp;|&nbsp; ${escapeHTML(r.width)} × ${escapeHTML(r.height)}` : '';
         const mediaLabel = r.mediaType === 'video' ? '视频' : '图片';
         return `
@@ -552,7 +637,7 @@
                 &nbsp;|&nbsp; 文件保留 ${escapeHTML(r.expiresInHours)} 小时
               </div>
             </div>
-            <a href="${escapeHTML(r.downloadUrl || r.url)}" download="${escapeHTML(r.outputFilename)}" class="download-btn">下载 ${escapeHTML(r.outputFormat).toUpperCase()}</a>
+            <button type="button" onclick="downloadResult(${index})" class="download-btn">下载 ${escapeHTML(r.outputFormat).toUpperCase()}</button>
           </div>
         `;
       }).join('');
