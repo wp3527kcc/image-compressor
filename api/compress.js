@@ -210,7 +210,7 @@ module.exports = async function handler(req, res) {
       const originalSize = Number(file.size) || 0;
       const originalBaseName = getBaseName(originalName);
       const outputFilename = `${originalBaseName}.webp`;
-      const outputPathname = `compressed/${Date.now()}-${Math.random().toString(36).slice(2)}-${getSafePathSegment(outputFilename)}`;
+      const outputPathname = `compressed/${getSafePathSegment(outputFilename)}`;
       const inputBuffer = await fetchSourceBuffer(file);
       const metadata = await sharp(inputBuffer).metadata();
       const outputBuffer = await sharp(inputBuffer)
@@ -218,7 +218,7 @@ module.exports = async function handler(req, res) {
         .toBuffer();
       const compressedBlob = await put(outputPathname, outputBuffer, {
         access: 'public',
-        addRandomSuffix: true,
+        addRandomSuffix: false,
         cacheControlMaxAge: 24 * 60 * 60,
       });
       const sourceSize = originalSize || inputBuffer.length;
