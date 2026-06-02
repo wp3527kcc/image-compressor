@@ -6,6 +6,7 @@ const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
 const { put, list } = require('@vercel/blob');
 const { cleanupExpiredImages } = require('./cleanup');
+const { applyRateLimitHeaders, checkRateLimit } = require('./rate-limit');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
@@ -89,6 +90,15 @@ function normalizeImageFormat(value) {
   return IMAGE_FORMATS[format] ? format : 'webp';
 }
 
+function normalizeResizeOptions(value) {
+  const maxWidth = parseInt(value?.maxWidth, 10);
+  const maxHeight = parseInt(value?.maxHeight, 10);
+  return {
+    maxWidth: Number.isFinite(maxWidth) && maxWidth > 0 ? Math.min(maxWidth, 12000) : null,
+    maxHeight: Number.isFinite(maxHeight) && maxHeight > 0 ? Math.min(maxHeight, 12000) : null,
+  };
+}
+
 function normalizeMediaType(file) {
   const type = String(file.type || '').toLowerCase();
   if (type.startsWith('video/')) return 'video';
@@ -151,8 +161,17 @@ async function fetchSourceBuffer(file, maxSize) {
   return Buffer.from(arrayBuffer);
 }
 
-function convertImage(inputBuffer, format, quality) {
+function convertImage(inputBuffer, format, quality, resizeOptions) {
   const pipeline = sharp(inputBuffer);
+  if (resizeOptions?.maxWidth || resizeOptions?.maxHeight) {
+    pipeline.resize({
+      width: resizeOptions.maxWidth || undefined,
+      height: resizeOptions.maxHeight || undefined,
+      fit: 'inside',
+      withoutEnlargement: true,
+    });
+  }
+
   if (format === 'jpeg') {
     return pipeline.jpeg({ quality, mozjpeg: true }).toBuffer();
   }
@@ -286,14 +305,14 @@ async function runCleanup() {
   }
 }
 
-async function processImage(file, inputBuffer, quality, imageFormat) {
+async function processImage(file, inputBuffer, quality, imageFormat, resizeOptions) {
   const originalName = String(file.name || 'image');
   const originalSize = Number(file.size) || inputBuffer.length;
   const formatConfig = IMAGE_FORMATS[imageFormat];
   const outputFilename = `${getBaseName(originalName)}.${formatConfig.extension}`;
   const outputPathname = `compressed/${getSafePathSegment(outputFilename)}`;
-  const metadata = await sharp(inputBuffer).metadata();
-  const outputBuffer = await convertImage(inputBuffer, imageFormat, quality);
+  const outputBuffer = await convertImage(inputBuffer, imageFormat, quality, resizeOptions);
+  const metadata = await sharp(outputBuffer).metadata();
   const compressedBlob = await put(outputPathname, outputBuffer, {
     access: 'public',
     addRandomSuffix: true,
@@ -356,6 +375,12 @@ module.exports = async function handler(req, res) {
   }
 
   try {
+    const rateLimit = await checkRateLimit(req, 'compress');
+    applyRateLimitHeaders(res, rateLimit);
+    if (rateLimit.limited) {
+      return res.status(429).json({ error: '压缩请求过于频繁，请稍后再试' });
+    }
+
     const body = await readJsonBody(req);
     const files = Array.isArray(body.files) ? body.files.slice(0, MAX_FILES) : [];
 
@@ -365,6 +390,7 @@ module.exports = async function handler(req, res) {
 
     const quality = clampQuality(body.quality);
     const imageFormat = normalizeImageFormat(body.imageFormat);
+    const resizeOptions = normalizeResizeOptions(body.imageResize);
     const results = [];
     const recordsToSave = [];
     const clientIP = getClientIP(req);
@@ -376,7 +402,7 @@ module.exports = async function handler(req, res) {
       const inputBuffer = await fetchSourceBuffer(file, maxSize);
       const processed = mediaType === 'video'
         ? await processVideo(file, inputBuffer, quality)
-        : await processImage(file, inputBuffer, quality, imageFormat);
+        : await processImage(file, inputBuffer, quality, imageFormat, resizeOptions);
       const { result, recordType } = processed;
 
       results.push(result);

@@ -12,16 +12,23 @@
 - 图片可输出为 WebP、JPEG、PNG、AVIF。
 - 视频统一输出为 MP4。
 - 支持图片缩略图和视频预览。
-- 支持单个下载和一键下载所有结果。
+- 支持单个下载和打包下载 ZIP。
 - 自动展示原大小、压缩后大小、压缩率、图片尺寸和结果保留时间。
+- 支持图片最大宽度、最大高度限制，避免放大原图。
+- 基于 `localStorage` 保存压缩偏好和最近压缩历史。
+- 展示当日累计处理图片数量、视频数量和节省空间。
+- 支持文件级上传/压缩状态展示，失败文件可单独重试。
+- 支持基于 Redis 的 IP 限流，保护上传授权和压缩接口。
 - 自动清理超过 24 小时的上传文件和压缩结果。
 
 ## 技术栈
 
 - **前端**：原生 HTML/CSS/JavaScript
 - **上传**：`@vercel/blob/client`
+- **打包下载**：JSZip
 - **后端**：Vercel Serverless Functions
 - **存储**：Vercel Blob
+- **限流**：Upstash Redis REST API
 - **图片处理**：Sharp
 - **视频处理**：fluent-ffmpeg + ffmpeg-static
 - **本地开发**：Node.js 自定义开发服务器
@@ -33,7 +40,8 @@ image-compressor/
 ├── api/
 │   ├── upload.js         # Vercel Blob 客户端上传授权
 │   ├── compress.js       # 媒体压缩接口
-│   └── cleanup.js        # 过期 Blob 清理接口
+│   ├── cleanup.js        # 过期 Blob 清理接口
+│   └── rate-limit.js     # Redis IP 限流工具
 ├── public/
 │   └── index.html        # 前端页面
 ├── dev-server.js         # 本地开发服务器
@@ -64,6 +72,19 @@ http://localhost:4000
 BLOB_READ_WRITE_TOKEN=your_vercel_blob_token
 ```
 
+如果需要在本地验证 IP 限流，还需要配置 Upstash Redis：
+
+```bash
+UPSTASH_REDIS_REST_URL=https://your-redis.upstash.io
+UPSTASH_REDIS_REST_TOKEN=your_upstash_token
+UPLOAD_RATE_LIMIT=60
+UPLOAD_RATE_LIMIT_WINDOW_SECONDS=3600
+COMPRESS_RATE_LIMIT=20
+COMPRESS_RATE_LIMIT_WINDOW_SECONDS=3600
+```
+
+未配置 Redis 时，本地开发会跳过限流，不影响页面调试。
+
 ## 部署到 Vercel
 
 ### 方式一：通过 Vercel CLI
@@ -78,7 +99,8 @@ vercel
 2. 在 Vercel Dashboard 导入项目。
 3. 创建并绑定 Vercel Blob Store。
 4. 配置 `BLOB_READ_WRITE_TOKEN` 环境变量。
-5. 触发部署。
+5. 配置 Upstash Redis 环境变量以启用 IP 限流。
+6. 触发部署。
 
 ## API 接口
 
@@ -92,6 +114,7 @@ vercel
 - 单个文件最大 100MB。
 - 允许图片和视频 MIME 类型。
 - 上传文件会添加随机后缀，缓存时间为 24 小时。
+- 默认 IP 限流：每小时 60 次上传授权请求，可通过 `UPLOAD_RATE_LIMIT` 调整。
 
 ### POST `/api/compress`
 
@@ -103,6 +126,10 @@ vercel
 {
   "quality": 80,
   "imageFormat": "webp",
+  "imageResize": {
+    "maxWidth": 1920,
+    "maxHeight": 1080
+  },
   "files": [
     {
       "name": "photo.jpg",
@@ -122,7 +149,10 @@ vercel
 |------|------|------|
 | `quality` | number | 压缩质量，范围 1-100，默认 80 |
 | `imageFormat` | string | 图片输出格式，支持 `webp`、`jpeg`、`png`、`avif` |
+| `imageResize` | object | 可选图片尺寸限制，支持 `maxWidth`、`maxHeight` |
 | `files` | array | 已上传到 Vercel Blob 的文件列表，最多 20 个 |
+
+默认 IP 限流：每小时 20 次压缩请求，可通过 `COMPRESS_RATE_LIMIT` 调整。
 
 响应示例：
 

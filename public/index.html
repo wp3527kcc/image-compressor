@@ -109,6 +109,19 @@
       cursor: pointer;
     }
 
+    .controls input[type="number"] {
+      width: 110px;
+      padding: 8px 10px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      color: #374151;
+    }
+
+    .control-hint {
+      color: #9ca3af;
+      font-size: 0.78rem;
+    }
+
     .format-options {
       display: flex;
       flex-wrap: wrap;
@@ -234,6 +247,49 @@
       color: #9ca3af;
     }
 
+    .file-item .status {
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      white-space: nowrap;
+      background: #e5e7eb;
+      color: #374151;
+    }
+
+    .file-item .status.uploading,
+    .file-item .status.compressing {
+      background: #dbeafe;
+      color: #1d4ed8;
+    }
+
+    .file-item .status.done {
+      background: #dcfce7;
+      color: #166534;
+    }
+
+    .file-item .status.failed {
+      background: #fee2e2;
+      color: #b91c1c;
+    }
+
+    .file-item .file-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .file-item .retry {
+      border: none;
+      background: #f97316;
+      color: #fff;
+      border-radius: 999px;
+      padding: 4px 10px;
+      cursor: pointer;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
     .file-item .remove {
       cursor: pointer;
       color: #ef4444;
@@ -343,6 +399,93 @@
       display: none;
     }
 
+    .dashboard {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    .stat-card {
+      background: #f8fafc;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 14px;
+    }
+
+    .stat-card .label {
+      color: #64748b;
+      font-size: 0.78rem;
+      margin-bottom: 6px;
+    }
+
+    .stat-card .value {
+      color: #111827;
+      font-size: 1.35rem;
+      font-weight: 700;
+    }
+
+    .history-panel {
+      margin-top: 24px;
+      padding-top: 20px;
+      border-top: 1px solid #e5e7eb;
+    }
+
+    .section-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+      color: #111827;
+      font-size: 1rem;
+    }
+
+    .link-button {
+      border: none;
+      background: transparent;
+      color: #667eea;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+
+    .history-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .history-empty {
+      color: #9ca3af;
+      font-size: 0.9rem;
+      padding: 10px 0;
+    }
+
+    .history-item {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      padding: 12px;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      background: #fff;
+    }
+
+    .history-item .title {
+      color: #374151;
+      font-weight: 600;
+      font-size: 0.9rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .history-item .meta {
+      color: #6b7280;
+      font-size: 0.78rem;
+      margin-top: 4px;
+    }
+
     .preview-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
@@ -393,6 +536,31 @@
             <label class="format-option"><input type="radio" name="imageFormat" value="avif">AVIF</label>
           </div>
         </div>
+        <div class="control-row">
+          <label>最大宽度：</label>
+          <input type="number" id="maxWidth" min="1" max="12000" placeholder="不限制">
+          <span class="control-hint">px</span>
+        </div>
+        <div class="control-row">
+          <label>最大高度：</label>
+          <input type="number" id="maxHeight" min="1" max="12000" placeholder="不限制">
+          <span class="control-hint">px</span>
+        </div>
+      </div>
+
+      <div class="dashboard" id="todayStats">
+        <div class="stat-card">
+          <div class="label">今日处理图片</div>
+          <div class="value" id="todayImageCount">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">今日处理视频</div>
+          <div class="value" id="todayVideoCount">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">今日节省空间</div>
+          <div class="value" id="todaySavedSize">0 B</div>
+        </div>
       </div>
 
       <div class="btn-group">
@@ -407,14 +575,30 @@
       <div class="error" id="error"></div>
 
       <div class="results-toolbar" id="resultsToolbar">
-        <button class="btn btn-secondary" id="downloadAllBtn" type="button">下载所有</button>
+        <button class="btn btn-secondary" id="downloadAllBtn" type="button">打包下载 ZIP</button>
       </div>
       <div class="results" id="results"></div>
+
+      <div class="history-panel">
+        <div class="section-title">
+          <span>本地压缩历史</span>
+          <button class="link-button" id="clearHistoryBtn" type="button">清空历史</button>
+        </div>
+        <div class="history-list" id="historyList"></div>
+      </div>
     </div>
   </div>
 
   <script type="module">
+    import JSZip from 'https://esm.sh/jszip@3.10.1';
     import { upload } from 'https://esm.sh/@vercel/blob@0.23.3/client';
+
+    const STORAGE_KEYS = {
+      preferences: 'image-compressor:preferences:v1',
+      history: 'image-compressor:history:v1',
+    };
+    const MAX_FILES = 20;
+    const MAX_HISTORY = 50;
 
     const uploadArea = document.getElementById('uploadArea');
     const fileInput = document.getElementById('fileInput');
@@ -422,6 +606,8 @@
     const previewGrid = document.getElementById('previewGrid');
     const qualitySlider = document.getElementById('quality');
     const qualityValue = document.getElementById('qualityValue');
+    const maxWidthInput = document.getElementById('maxWidth');
+    const maxHeightInput = document.getElementById('maxHeight');
     const compressBtn = document.getElementById('compressBtn');
     const loading = document.getElementById('loading');
     const loadingText = loading.querySelector('p');
@@ -429,55 +615,47 @@
     const resultsToolbar = document.getElementById('resultsToolbar');
     const downloadAllBtn = document.getElementById('downloadAllBtn');
     const resultsEl = document.getElementById('results');
+    const todayImageCount = document.getElementById('todayImageCount');
+    const todayVideoCount = document.getElementById('todayVideoCount');
+    const todaySavedSize = document.getElementById('todaySavedSize');
+    const historyList = document.getElementById('historyList');
+    const clearHistoryBtn = document.getElementById('clearHistoryBtn');
 
     let selectedFiles = [];
     let latestResults = [];
+    let isProcessing = false;
 
-    qualitySlider.addEventListener('input', () => {
-      qualityValue.textContent = qualitySlider.value + '%';
-    });
+    const statusLabels = {
+      pending: '待处理',
+      uploading: '上传中',
+      compressing: '压缩中',
+      done: '已完成',
+      failed: '失败',
+    };
 
-    uploadArea.addEventListener('click', () => fileInput.click());
-
-    uploadArea.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      uploadArea.classList.add('dragover');
-    });
-
-    uploadArea.addEventListener('dragleave', () => {
-      uploadArea.classList.remove('dragover');
-    });
-
-    uploadArea.addEventListener('drop', (e) => {
-      e.preventDefault();
-      uploadArea.classList.remove('dragover');
-      const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/') || f.type.startsWith('video/'));
-      addFiles(files);
-    });
-
-    fileInput.addEventListener('change', () => {
-      addFiles(Array.from(fileInput.files));
-      fileInput.value = '';
-    });
-
-    function addFiles(files) {
-      selectedFiles = [...selectedFiles, ...files].slice(0, 20);
-      renderFileList();
-      compressBtn.disabled = selectedFiles.length === 0;
+    function safeReadJSON(key, fallback) {
+      try {
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : fallback;
+      } catch (error) {
+        return fallback;
+      }
     }
 
-    function removeFile(index) {
-      selectedFiles.splice(index, 1);
-      renderFileList();
-      compressBtn.disabled = selectedFiles.length === 0;
+    function safeWriteJSON(key, value) {
+      try {
+        localStorage.setItem(key, JSON.stringify(value));
+      } catch (error) {
+        console.warn('写入本地存储失败:', error);
+      }
     }
-
-    window.removeFile = removeFile;
 
     function formatSize(bytes) {
-      if (bytes < 1024) return bytes + ' B';
-      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-      return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+      const value = Number(bytes) || 0;
+      if (value < 1024) return value + ' B';
+      if (value < 1024 * 1024) return (value / 1024).toFixed(1) + ' KB';
+      if (value < 1024 * 1024 * 1024) return (value / (1024 * 1024)).toFixed(2) + ' MB';
+      return (value / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
     }
 
     function escapeHTML(value) {
@@ -507,16 +685,344 @@
       return document.querySelector('input[name="imageFormat"]:checked')?.value || 'webp';
     }
 
-    function downloadFile(url, filename, index = 0) {
-      setTimeout(() => {
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = filename;
-        link.target = '_blank';
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-      }, index * 250);
+    function getLocalDateKey(date = new Date()) {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+
+    function parsePositiveInt(value) {
+      const parsed = parseInt(value, 10);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    }
+
+    function getResizeOptions() {
+      return {
+        maxWidth: parsePositiveInt(maxWidthInput.value),
+        maxHeight: parsePositiveInt(maxHeightInput.value),
+      };
+    }
+
+    function savePreferences() {
+      safeWriteJSON(STORAGE_KEYS.preferences, {
+        quality: qualitySlider.value,
+        imageFormat: getSelectedImageFormat(),
+        maxWidth: maxWidthInput.value,
+        maxHeight: maxHeightInput.value,
+      });
+    }
+
+    function loadPreferences() {
+      const preferences = safeReadJSON(STORAGE_KEYS.preferences, {});
+      if (preferences.quality) {
+        qualitySlider.value = preferences.quality;
+      }
+      if (preferences.imageFormat) {
+        const formatInput = document.querySelector(`input[name="imageFormat"][value="${preferences.imageFormat}"]`);
+        if (formatInput) formatInput.checked = true;
+      }
+      maxWidthInput.value = preferences.maxWidth || '';
+      maxHeightInput.value = preferences.maxHeight || '';
+      qualityValue.textContent = qualitySlider.value + '%';
+    }
+
+    function getHistory() {
+      return safeReadJSON(STORAGE_KEYS.history, []);
+    }
+
+    function saveHistory(history) {
+      safeWriteJSON(STORAGE_KEYS.history, history.slice(0, MAX_HISTORY));
+    }
+
+    function addHistoryEntry(result) {
+      const savedBytes = Math.max(0, (Number(result.originalSize) || 0) - (Number(result.compressedSize) || 0));
+      const now = new Date();
+      const entry = {
+        id: `${now.getTime()}-${Math.random().toString(36).slice(2)}`,
+        time: now.toISOString(),
+        dayKey: getLocalDateKey(now),
+        mediaType: result.mediaType,
+        originalName: result.originalName,
+        originalSize: result.originalSize,
+        compressedSize: result.compressedSize,
+        savedBytes,
+        compressionRatio: result.compressionRatio,
+        outputFormat: result.outputFormat,
+        outputFilename: result.outputFilename,
+        downloadUrl: result.downloadUrl || result.url,
+      };
+      saveHistory([entry, ...getHistory()]);
+      renderHistory();
+      renderTodayStats();
+    }
+
+    function renderTodayStats() {
+      const today = getLocalDateKey();
+      const todayEntries = getHistory().filter(entry => entry.dayKey === today);
+      const imageCount = todayEntries.filter(entry => entry.mediaType === 'image').length;
+      const videoCount = todayEntries.filter(entry => entry.mediaType === 'video').length;
+      const savedBytes = todayEntries.reduce((sum, entry) => sum + (Number(entry.savedBytes) || 0), 0);
+
+      todayImageCount.textContent = imageCount;
+      todayVideoCount.textContent = videoCount;
+      todaySavedSize.textContent = formatSize(savedBytes);
+    }
+
+    function renderHistory() {
+      const history = getHistory();
+      if (history.length === 0) {
+        historyList.innerHTML = '<div class="history-empty">暂无本地历史记录</div>';
+        return;
+      }
+
+      historyList.innerHTML = history.slice(0, 10).map(entry => {
+        const time = new Date(entry.time).toLocaleString('zh-CN');
+        const mediaLabel = entry.mediaType === 'video' ? '视频' : '图片';
+        return `
+          <div class="history-item">
+            <div>
+              <div class="title">${escapeHTML(entry.originalName)} → ${escapeHTML(entry.outputFilename)}</div>
+              <div class="meta">${escapeHTML(time)} · ${mediaLabel} · ${formatSize(entry.originalSize)} → ${formatSize(entry.compressedSize)} · 节省 ${formatSize(entry.savedBytes)}</div>
+            </div>
+            <button type="button" class="link-button" onclick="downloadHistoryItem('${escapeHTML(entry.id)}')">下载</button>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function updateCompressButton() {
+      compressBtn.disabled = isProcessing || selectedFiles.length === 0;
+    }
+
+    function createFileItem(file) {
+      return {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        file,
+        status: 'pending',
+        message: '',
+        previewUrl: URL.createObjectURL(file),
+        uploadedFile: null,
+        result: null,
+      };
+    }
+
+    function addFiles(files) {
+      const mediaFiles = files.filter(file => file.type.startsWith('image/') || file.type.startsWith('video/'));
+      const remainingSlots = MAX_FILES - selectedFiles.length;
+      selectedFiles = [...selectedFiles, ...mediaFiles.slice(0, remainingSlots).map(createFileItem)];
+      renderFileList();
+      updateCompressButton();
+    }
+
+    function removeFile(index) {
+      if (isProcessing) return;
+      const [item] = selectedFiles.splice(index, 1);
+      if (item?.previewUrl) URL.revokeObjectURL(item.previewUrl);
+      renderFileList();
+      updateCompressButton();
+    }
+
+    function setItemStatus(index, status, message = '') {
+      const item = selectedFiles[index];
+      if (!item) return;
+      item.status = status;
+      item.message = message;
+      renderFileList();
+    }
+
+    function renderFileList() {
+      fileList.innerHTML = selectedFiles.map((item, i) => {
+        const retryButton = item.status === 'failed' && !isProcessing
+          ? `<button type="button" class="retry" onclick="retryFile(${i})">重试</button>`
+          : '';
+        const message = item.message ? ` · ${escapeHTML(item.message)}` : '';
+        const removeButton = isProcessing
+          ? ''
+          : `<svg class="remove" onclick="removeFile(${i})" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="3,6 5,6 21,6"></polyline>
+                <path d="M19,6v14a2,2,0,0,1-2,2H7a2,2,0,0,1-2-2V6M8,6V4a2,2,0,0,1,2-2h4a2,2,0,0,1,2,2v2"></path>
+                <line x1="10" y1="11" x2="10" y2="17"></line>
+                <line x1="14" y1="11" x2="14" y2="17"></line>
+              </svg>`;
+        return `
+          <div class="file-item">
+            <span class="name">${escapeHTML(item.file.name)}</span>
+            <span class="size">${formatSize(item.file.size)}</span>
+            <span class="status ${escapeHTML(item.status)}">${escapeHTML(statusLabels[item.status] || item.status)}${message}</span>
+            <span class="file-actions">
+              ${retryButton}
+              ${removeButton}
+            </span>
+          </div>
+        `;
+      }).join('');
+
+      previewGrid.innerHTML = '';
+      selectedFiles.forEach(item => {
+        const preview = item.file.type.startsWith('video/') ? document.createElement('video') : document.createElement('img');
+        preview.src = item.previewUrl;
+        if (item.file.type.startsWith('video/')) {
+          preview.controls = true;
+          preview.muted = true;
+        }
+        previewGrid.appendChild(preview);
+      });
+    }
+
+    async function uploadFileToBlob(item, index) {
+      if (item.uploadedFile) return item.uploadedFile;
+
+      setItemStatus(index, 'uploading', '');
+      loadingText.textContent = `正在上传 ${index + 1}/${selectedFiles.length}：${item.file.name}`;
+      const blob = await upload(getUploadPath(item.file), item.file, {
+        access: 'public',
+        handleUploadUrl: '/api/upload',
+      });
+
+      item.uploadedFile = {
+        name: item.file.name,
+        size: item.file.size,
+        type: item.file.type,
+        url: blob.url,
+        downloadUrl: blob.downloadUrl || blob.url,
+        pathname: blob.pathname,
+      };
+      return item.uploadedFile;
+    }
+
+    async function compressUploadedFile(uploadedFile, index) {
+      setItemStatus(index, 'compressing', '');
+      loadingText.textContent = `正在压缩 ${index + 1}/${selectedFiles.length}：${uploadedFile.name}`;
+      const response = await fetch('/api/compress', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          quality: qualitySlider.value,
+          imageFormat: getSelectedImageFormat(),
+          imageResize: getResizeOptions(),
+          files: [uploadedFile],
+        }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || '压缩失败');
+      }
+
+      return data.results?.[0];
+    }
+
+    async function processItem(index) {
+      const item = selectedFiles[index];
+      if (!item) return null;
+
+      try {
+        const uploadedFile = await uploadFileToBlob(item, index);
+        const result = await compressUploadedFile(uploadedFile, index);
+        if (!result) throw new Error('压缩结果为空');
+
+        const enrichedResult = { ...result, localId: item.id };
+        item.result = enrichedResult;
+        setItemStatus(index, 'done', '');
+        latestResults = [...latestResults.filter(entry => entry.localId !== item.id), enrichedResult];
+        renderResults(latestResults);
+        addHistoryEntry(enrichedResult);
+        return enrichedResult;
+      } catch (error) {
+        item.result = null;
+        setItemStatus(index, 'failed', error.message || '处理失败');
+        throw error;
+      }
+    }
+
+    async function processSelectedFiles(indices) {
+      if (indices.length === 0) return;
+
+      isProcessing = true;
+      updateCompressButton();
+      loading.classList.add('active');
+      errorEl.style.display = 'none';
+
+      const failures = [];
+      for (const index of indices) {
+        try {
+          await processItem(index);
+        } catch (error) {
+          failures.push(error.message || '处理失败');
+        }
+      }
+
+      if (failures.length > 0) {
+        errorEl.textContent = `${failures.length} 个文件处理失败，可在文件列表中单独重试。`;
+        errorEl.style.display = 'block';
+      }
+
+      loadingText.textContent = '正在压缩中，请稍候...';
+      loading.classList.remove('active');
+      isProcessing = false;
+      updateCompressButton();
+    }
+
+    function downloadFile(url, filename) {
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      link.target = '_blank';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    }
+
+    function getUniqueZipName(name, usedNames) {
+      const safeName = sanitizePathSegment(name);
+      if (!usedNames.has(safeName)) {
+        usedNames.add(safeName);
+        return safeName;
+      }
+
+      const dotIndex = safeName.lastIndexOf('.');
+      const base = dotIndex > 0 ? safeName.slice(0, dotIndex) : safeName;
+      const ext = dotIndex > 0 ? safeName.slice(dotIndex) : '';
+      let index = 2;
+      let nextName = `${base}-${index}${ext}`;
+      while (usedNames.has(nextName)) {
+        index += 1;
+        nextName = `${base}-${index}${ext}`;
+      }
+      usedNames.add(nextName);
+      return nextName;
+    }
+
+    async function downloadAllResults() {
+      if (latestResults.length === 0) return;
+
+      const originalText = downloadAllBtn.textContent;
+      downloadAllBtn.disabled = true;
+      downloadAllBtn.textContent = '正在打包...';
+      errorEl.style.display = 'none';
+
+      try {
+        const zip = new JSZip();
+        const usedNames = new Set();
+        for (const result of latestResults) {
+          const response = await fetch(result.downloadUrl || result.url, { cache: 'no-store' });
+          if (!response.ok) throw new Error(`下载 ${result.outputFilename} 失败`);
+          const blob = await response.blob();
+          zip.file(getUniqueZipName(result.outputFilename, usedNames), blob);
+        }
+
+        const zipBlob = await zip.generateAsync({ type: 'blob' });
+        const zipUrl = URL.createObjectURL(zipBlob);
+        downloadFile(zipUrl, `compressed-${Date.now()}.zip`);
+        setTimeout(() => URL.revokeObjectURL(zipUrl), 30000);
+      } catch (error) {
+        errorEl.textContent = error.message || '打包下载失败';
+        errorEl.style.display = 'block';
+      } finally {
+        downloadAllBtn.disabled = false;
+        downloadAllBtn.textContent = originalText;
+      }
     }
 
     function downloadResult(index) {
@@ -525,100 +1031,11 @@
       downloadFile(result.downloadUrl || result.url, result.outputFilename);
     }
 
-    function downloadAllResults() {
-      latestResults.forEach((result, index) => {
-        downloadFile(result.downloadUrl || result.url, result.outputFilename, index);
-      });
+    function downloadHistoryItem(id) {
+      const item = getHistory().find(entry => entry.id === id);
+      if (!item?.downloadUrl) return;
+      downloadFile(item.downloadUrl, item.outputFilename);
     }
-
-    window.downloadResult = downloadResult;
-    downloadAllBtn.addEventListener('click', downloadAllResults);
-
-    function renderFileList() {
-      fileList.innerHTML = selectedFiles.map((file, i) => `
-        <div class="file-item">
-          <span class="name">${escapeHTML(file.name)}</span>
-          <span class="size">${formatSize(file.size)}</span>
-          <svg class="remove" onclick="removeFile(${i})" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="3,6 5,6 21,6"></polyline>
-            <path d="M19,6v14a2,2,0,0,1-2,2H7a2,2,0,0,1-2-2V6M8,6V4a2,2,0,0,1,2-2h4a2,2,0,0,1,2,2v2"></path>
-            <line x1="10" y1="11" x2="10" y2="17"></line>
-            <line x1="14" y1="11" x2="14" y2="17"></line>
-          </svg>
-        </div>
-      `).join('');
-
-      previewGrid.innerHTML = '';
-      selectedFiles.forEach(file => {
-        const preview = file.type.startsWith('video/') ? document.createElement('video') : document.createElement('img');
-        preview.src = URL.createObjectURL(file);
-        if (file.type.startsWith('video/')) {
-          preview.controls = true;
-          preview.muted = true;
-        }
-        previewGrid.appendChild(preview);
-      });
-    }
-
-    async function uploadFilesToBlob() {
-      const uploadedFiles = [];
-      for (let i = 0; i < selectedFiles.length; i++) {
-        const file = selectedFiles[i];
-        loadingText.textContent = `正在上传原图 ${i + 1}/${selectedFiles.length}，请稍候...`;
-        const blob = await upload(getUploadPath(file), file, {
-          access: 'public',
-          handleUploadUrl: '/api/upload',
-        });
-        uploadedFiles.push({
-          name: file.name,
-          size: file.size,
-          type: file.type,
-          url: blob.url,
-          downloadUrl: blob.downloadUrl || blob.url,
-          pathname: blob.pathname,
-        });
-      }
-      return uploadedFiles;
-    }
-
-    compressBtn.addEventListener('click', async () => {
-      if (selectedFiles.length === 0) return;
-
-      loading.classList.add('active');
-      errorEl.style.display = 'none';
-      resultsEl.innerHTML = '';
-      latestResults = [];
-      resultsToolbar.classList.remove('active');
-      compressBtn.disabled = true;
-
-      try {
-        const uploadedFiles = await uploadFilesToBlob();
-        loadingText.textContent = '正在压缩中，请稍候...';
-        const response = await fetch('/api/compress', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            quality: qualitySlider.value,
-            imageFormat: getSelectedImageFormat(),
-            files: uploadedFiles,
-          }),
-        });
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(data.error || '压缩失败');
-        }
-
-        renderResults(data.results);
-      } catch (err) {
-        errorEl.textContent = '❌ ' + err.message;
-        errorEl.style.display = 'block';
-      } finally {
-        loadingText.textContent = '正在压缩中，请稍候...';
-        loading.classList.remove('active');
-        compressBtn.disabled = selectedFiles.length === 0;
-      }
-    });
 
     function renderResults(results) {
       latestResults = results;
@@ -626,6 +1043,7 @@
       resultsEl.innerHTML = results.map((r, index) => {
         const dimensions = r.mediaType === 'image' ? `&nbsp;|&nbsp; ${escapeHTML(r.width)} × ${escapeHTML(r.height)}` : '';
         const mediaLabel = r.mediaType === 'video' ? '视频' : '图片';
+        const savedBytes = Math.max(0, (Number(r.originalSize) || 0) - (Number(r.compressedSize) || 0));
         return `
           <div class="result-item">
             <div class="info">
@@ -633,6 +1051,7 @@
               <div class="stats">
                 ${mediaLabel} ${formatSize(r.originalSize)} → ${formatSize(r.compressedSize)}
                 <span class="ratio">压缩 ${escapeHTML(r.compressionRatio)}%</span>
+                &nbsp;|&nbsp; 节省 ${formatSize(savedBytes)}
                 ${dimensions}
                 &nbsp;|&nbsp; 文件保留 ${escapeHTML(r.expiresInHours)} 小时
               </div>
@@ -642,6 +1061,59 @@
         `;
       }).join('');
     }
+
+    compressBtn.addEventListener('click', () => {
+      latestResults = [];
+      renderResults([]);
+      const indices = selectedFiles.map((item, index) => index);
+      processSelectedFiles(indices);
+    });
+
+    uploadArea.addEventListener('click', () => fileInput.click());
+    uploadArea.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      uploadArea.classList.add('dragover');
+    });
+    uploadArea.addEventListener('dragleave', () => {
+      uploadArea.classList.remove('dragover');
+    });
+    uploadArea.addEventListener('drop', (event) => {
+      event.preventDefault();
+      uploadArea.classList.remove('dragover');
+      addFiles(Array.from(event.dataTransfer.files));
+    });
+    fileInput.addEventListener('change', () => {
+      addFiles(Array.from(fileInput.files));
+      fileInput.value = '';
+    });
+
+    qualitySlider.addEventListener('input', () => {
+      qualityValue.textContent = qualitySlider.value + '%';
+      savePreferences();
+    });
+    document.querySelectorAll('input[name="imageFormat"]').forEach(input => {
+      input.addEventListener('change', savePreferences);
+    });
+    maxWidthInput.addEventListener('input', savePreferences);
+    maxHeightInput.addEventListener('input', savePreferences);
+    downloadAllBtn.addEventListener('click', downloadAllResults);
+    clearHistoryBtn.addEventListener('click', () => {
+      saveHistory([]);
+      renderHistory();
+      renderTodayStats();
+    });
+
+    window.removeFile = removeFile;
+    window.retryFile = index => {
+      if (!isProcessing) processSelectedFiles([index]);
+    };
+    window.downloadResult = downloadResult;
+    window.downloadHistoryItem = downloadHistoryItem;
+
+    loadPreferences();
+    renderHistory();
+    renderTodayStats();
+    updateCompressButton();
   </script>
 </body>
 </html>

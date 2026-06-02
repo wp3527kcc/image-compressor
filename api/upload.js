@@ -1,4 +1,5 @@
 const { handleUpload } = require('@vercel/blob/client');
+const { applyRateLimitHeaders, checkRateLimit } = require('./rate-limit');
 
 const ALLOWED_CONTENT_TYPES = [
   'image/jpeg',
@@ -47,6 +48,12 @@ module.exports = async function handler(req, res) {
   }
 
   try {
+    const rateLimit = await checkRateLimit(req, 'upload');
+    applyRateLimitHeaders(res, rateLimit);
+    if (rateLimit.limited) {
+      return res.status(429).json({ error: '上传请求过于频繁，请稍后再试' });
+    }
+
     const body = await readJsonBody(req);
     const jsonResponse = await handleUpload({
       body,
