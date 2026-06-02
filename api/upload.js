@@ -1,7 +1,18 @@
 const { handleUpload } = require('@vercel/blob/client');
 
-const ALLOWED_CONTENT_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/bmp', 'image/tiff', 'image/webp'];
-const MAX_UPLOAD_SIZE = 50 * 1024 * 1024;
+const ALLOWED_CONTENT_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/bmp',
+  'image/tiff',
+  'image/webp',
+  'video/mp4',
+  'video/webm',
+  'video/quicktime',
+  'video/x-msvideo',
+];
+const MAX_UPLOAD_SIZE = 100 * 1024 * 1024;
 
 function readJsonBody(req) {
   if (req.body) {

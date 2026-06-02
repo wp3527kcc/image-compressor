@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>图片压缩 & WebP 转码工具</title>
+  <title>图片/视频压缩工具</title>
   <style>
     * {
       margin: 0;
@@ -83,13 +83,19 @@
     }
 
     .controls {
-      display: flex;
-      align-items: center;
-      gap: 20px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
       margin-top: 20px;
       padding: 16px;
       background: #f9fafb;
       border-radius: 8px;
+    }
+
+    .control-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
     }
 
     .controls label {
@@ -101,6 +107,15 @@
     .controls input[type="range"] {
       flex: 1;
       cursor: pointer;
+    }
+
+    .controls select {
+      flex: 1;
+      padding: 8px 10px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      background: #fff;
+      color: #374151;
     }
 
     .quality-value {
@@ -290,45 +305,58 @@
       margin-top: 12px;
     }
 
-    .preview-grid img {
+    .preview-grid img,
+    .preview-grid video {
       width: 100%;
       height: 80px;
       object-fit: cover;
       border-radius: 6px;
+      background: #111827;
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>🖼️ 图片压缩 & WebP 转码</h1>
-    <p class="subtitle">原图直传 Vercel Blob，压缩后 WebP 图片保留 24 小时</p>
+    <h1>🖼️ 图片/视频压缩工具</h1>
+    <p class="subtitle">原文件直传 Vercel Blob，压缩结果保留 24 小时</p>
 
     <div class="card">
       <div class="upload-area" id="uploadArea">
         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 16v-8m0 0l-3 3m3-3l3 3M3 16.5V18a2.5 2.5 0 002.5 2.5h13A2.5 2.5 0 0021 18v-1.5M16.5 7.5L12 3 7.5 7.5"/>
         </svg>
-        <p>点击或拖拽图片到这里上传</p>
-        <p class="hint">支持 JPEG、PNG、GIF、BMP、TIFF、WebP，最多 20 张，单张最大 50MB</p>
+        <p>点击或拖拽图片/视频到这里上传</p>
+        <p class="hint">图片支持 JPEG、PNG、GIF、BMP、TIFF、WebP；视频支持 MP4、WebM、MOV、AVI；最多 20 个文件</p>
       </div>
-      <input type="file" class="upload-input" id="fileInput" multiple accept="image/*">
+      <input type="file" class="upload-input" id="fileInput" multiple accept="image/*,video/*">
 
       <div class="file-list" id="fileList"></div>
       <div class="preview-grid" id="previewGrid"></div>
 
       <div class="controls">
-        <label>压缩质量：</label>
-        <input type="range" id="quality" min="1" max="100" value="80">
-        <span class="quality-value" id="qualityValue">80%</span>
+        <div class="control-row">
+          <label>压缩质量：</label>
+          <input type="range" id="quality" min="1" max="100" value="80">
+          <span class="quality-value" id="qualityValue">80%</span>
+        </div>
+        <div class="control-row">
+          <label>图片输出格式：</label>
+          <select id="imageFormat">
+            <option value="webp">WebP</option>
+            <option value="jpeg">JPEG</option>
+            <option value="png">PNG</option>
+            <option value="avif">AVIF</option>
+          </select>
+        </div>
       </div>
 
       <div class="btn-group">
-        <button class="btn btn-primary" id="compressBtn" disabled>开始压缩转码</button>
+        <button class="btn btn-primary" id="compressBtn" disabled>开始压缩</button>
       </div>
 
       <div class="loading" id="loading">
         <div class="spinner"></div>
-        <p>正在压缩转码中，请稍候...</p>
+        <p>正在压缩中，请稍候...</p>
       </div>
 
       <div class="error" id="error"></div>
@@ -346,6 +374,7 @@
     const previewGrid = document.getElementById('previewGrid');
     const qualitySlider = document.getElementById('quality');
     const qualityValue = document.getElementById('qualityValue');
+    const imageFormatSelect = document.getElementById('imageFormat');
     const compressBtn = document.getElementById('compressBtn');
     const loading = document.getElementById('loading');
     const loadingText = loading.querySelector('p');
@@ -372,7 +401,7 @@
     uploadArea.addEventListener('drop', (e) => {
       e.preventDefault();
       uploadArea.classList.remove('dragover');
-      const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+      const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/') || f.type.startsWith('video/'));
       addFiles(files);
     });
 
@@ -440,9 +469,13 @@
 
       previewGrid.innerHTML = '';
       selectedFiles.forEach(file => {
-        const img = document.createElement('img');
-        img.src = URL.createObjectURL(file);
-        previewGrid.appendChild(img);
+        const preview = file.type.startsWith('video/') ? document.createElement('video') : document.createElement('img');
+        preview.src = URL.createObjectURL(file);
+        if (file.type.startsWith('video/')) {
+          preview.controls = true;
+          preview.muted = true;
+        }
+        previewGrid.appendChild(preview);
       });
     }
 
@@ -477,12 +510,13 @@
 
       try {
         const uploadedFiles = await uploadFilesToBlob();
-        loadingText.textContent = '正在压缩转码中，请稍候...';
+        loadingText.textContent = '正在压缩中，请稍候...';
         const response = await fetch('/api/compress', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             quality: qualitySlider.value,
+            imageFormat: imageFormatSelect.value,
             files: uploadedFiles,
           }),
         });
@@ -497,27 +531,31 @@
         errorEl.textContent = '❌ ' + err.message;
         errorEl.style.display = 'block';
       } finally {
-        loadingText.textContent = '正在压缩转码中，请稍候...';
+        loadingText.textContent = '正在压缩中，请稍候...';
         loading.classList.remove('active');
         compressBtn.disabled = selectedFiles.length === 0;
       }
     });
 
     function renderResults(results) {
-      resultsEl.innerHTML = results.map(r => `
-        <div class="result-item">
-          <div class="info">
-            <div class="filename">${escapeHTML(r.originalName)} → ${escapeHTML(r.outputFilename)}</div>
-            <div class="stats">
-              ${formatSize(r.originalSize)} → ${formatSize(r.compressedSize)}
-              <span class="ratio">压缩 ${escapeHTML(r.compressionRatio)}%</span>
-              &nbsp;|&nbsp; ${escapeHTML(r.width)} × ${escapeHTML(r.height)}
-              &nbsp;|&nbsp; 图片保留 ${escapeHTML(r.expiresInHours)} 小时
+      resultsEl.innerHTML = results.map(r => {
+        const dimensions = r.mediaType === 'image' ? `&nbsp;|&nbsp; ${escapeHTML(r.width)} × ${escapeHTML(r.height)}` : '';
+        const mediaLabel = r.mediaType === 'video' ? '视频' : '图片';
+        return `
+          <div class="result-item">
+            <div class="info">
+              <div class="filename">${escapeHTML(r.originalName)} → ${escapeHTML(r.outputFilename)}</div>
+              <div class="stats">
+                ${mediaLabel} ${formatSize(r.originalSize)} → ${formatSize(r.compressedSize)}
+                <span class="ratio">压缩 ${escapeHTML(r.compressionRatio)}%</span>
+                ${dimensions}
+                &nbsp;|&nbsp; 文件保留 ${escapeHTML(r.expiresInHours)} 小时
+              </div>
             </div>
+            <a href="${escapeHTML(r.downloadUrl || r.url)}" download="${escapeHTML(r.outputFilename)}" class="download-btn">下载 ${escapeHTML(r.outputFormat).toUpperCase()}</a>
           </div>
-          <a href="${escapeHTML(r.downloadUrl || r.url)}" download="${escapeHTML(r.outputFilename)}" class="download-btn">下载 WebP</a>
-        </div>
-      `).join('');
+        `;
+      }).join('');
     }
   </script>
 </body>
