@@ -1,71 +1,56 @@
 const sharp = require('sharp');
-const Busboy = require('busboy');
 const { put, list } = require('@vercel/blob');
+const { cleanupExpiredImages } = require('./cleanup');
 
-// Vercel Serverless Function 的请求体大小限制配置
-module.exports.config = {
-  api: {
-    bodyParser: false, // 禁用默认 body parser，手动解析 multipart
-  },
-};
-
-// 记录文件名
 const RECORD_FILE = 'compression-records.md';
+const MAX_JSON_BODY_SIZE = 1024 * 1024;
+const MAX_FILES = 20;
+const MAX_SOURCE_SIZE = 50 * 1024 * 1024;
 
-// 获取客户端IP地址
 function getClientIP(req) {
-  return req.headers['x-forwarded-for'] || 
-         req.headers['x-real-ip'] || 
-         req.socket?.remoteAddress || 
-         'unknown';
+  const forwardedFor = req.headers['x-forwarded-for'];
+  const ip = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor;
+  return ip?.split(',')[0]?.trim() || req.headers['x-real-ip'] || req.socket?.remoteAddress || 'unknown';
 }
 
-// 解析 multipart/form-data 请求
-function parseMultipart(req) {
+function readJsonBody(req) {
+  if (req.body) {
+    if (Buffer.isBuffer(req.body)) {
+      return Promise.resolve(JSON.parse(req.body.toString('utf8') || '{}'));
+    }
+    if (typeof req.body === 'string') {
+      return Promise.resolve(JSON.parse(req.body || '{}'));
+    }
+    return Promise.resolve(req.body);
+  }
+
   return new Promise((resolve, reject) => {
-    const busboy = Busboy({
-      headers: req.headers,
-      defParamCharset: 'utf8',
-      limits: { fileSize: 50 * 1024 * 1024, files: 20 },
-    });
+    const chunks = [];
+    let size = 0;
 
-    const files = [];
-    const fields = {};
-
-    busboy.on('file', (fieldname, file, info) => {
-      const { filename, mimeType } = info;
-      const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/bmp', 'image/tiff', 'image/webp'];
-
-      if (!allowedTypes.includes(mimeType)) {
-        file.resume();
+    req.on('data', chunk => {
+      size += chunk.length;
+      if (size > MAX_JSON_BODY_SIZE) {
+        reject(new Error('请求体过大'));
+        req.destroy();
         return;
       }
-
-      const chunks = [];
-      file.on('data', (chunk) => chunks.push(chunk));
-      file.on('end', () => {
-        files.push({
-          fieldname,
-          originalname: filename,
-          mimetype: mimeType,
-          buffer: Buffer.concat(chunks),
-          size: Buffer.concat(chunks).length,
-        });
-      });
+      chunks.push(chunk);
     });
 
-    busboy.on('field', (name, value) => {
-      fields[name] = value;
+    req.on('end', () => {
+      try {
+        const rawBody = Buffer.concat(chunks).toString('utf8');
+        resolve(rawBody ? JSON.parse(rawBody) : {});
+      } catch (error) {
+        reject(error);
+      }
     });
 
-    busboy.on('finish', () => resolve({ files, fields }));
-    busboy.on('error', reject);
-
-    req.pipe(busboy);
+    req.on('error', reject);
   });
 }
 
-// 格式化文件大小
 function formatSize(bytes) {
   if (bytes === 0) return '0 B';
   const k = 1024;
@@ -74,7 +59,68 @@ function formatSize(bytes) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-// 从 Vercel Blob 读取历史记录
+function clampQuality(value) {
+  const quality = parseInt(value, 10);
+  if (Number.isNaN(quality)) return 80;
+  return Math.min(100, Math.max(1, quality));
+}
+
+function isAllowedBlobUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && url.hostname.endsWith('.vercel-storage.com');
+  } catch (error) {
+    return false;
+  }
+}
+
+function getBaseName(filename) {
+  const name = String(filename || 'image').replace(/[\\/]/g, '_');
+  const baseName = name.replace(/\.[^/.]+$/, '').trim();
+  return baseName || 'image';
+}
+
+function getSafePathSegment(value) {
+  return String(value || 'image')
+    .normalize('NFKC')
+    .replace(/[\\/:*?"<>|#%{}^~[\]`\r\n\t]+/g, '_')
+    .replace(/\s+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 120) || 'image';
+}
+
+function escapeMarkdownCell(value) {
+  return String(value ?? '')
+    .replace(/\|/g, '\\|')
+    .replace(/\r?\n/g, ' ')
+    .trim();
+}
+
+async function fetchSourceBuffer(file) {
+  const sourceUrl = file.downloadUrl || file.url;
+  if (!isAllowedBlobUrl(sourceUrl)) {
+    throw new Error('图片地址不合法');
+  }
+
+  const response = await fetch(sourceUrl, { cache: 'no-store' });
+  if (!response.ok) {
+    throw new Error(`读取图片失败: ${response.status}`);
+  }
+
+  const contentLength = Number(response.headers.get('content-length'));
+  if (Number.isFinite(contentLength) && contentLength > MAX_SOURCE_SIZE) {
+    throw new Error('图片大小超过 50MB 限制');
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  if (arrayBuffer.byteLength > MAX_SOURCE_SIZE) {
+    throw new Error('图片大小超过 50MB 限制');
+  }
+
+  return Buffer.from(arrayBuffer);
+}
+
 async function readRecords() {
   const defaultContent = '# 图片压缩记录\n\n| 时间 | IP地址 | 图片名称 | 压缩前大小 | 压缩后大小 | 压缩率 |\n|------|--------|----------|------------|------------|--------|\n';
 
@@ -95,9 +141,8 @@ async function readRecords() {
   }
 }
 
-// 追加新记录到 Markdown
 function appendRecord(markdownContent, record) {
-  const newRow = `| ${record.time} | ${record.ip} | ${record.imageName} | ${record.originalSize} | ${record.compressedSize} | ${record.compressionRatio} |\n`;
+  const newRow = `| ${escapeMarkdownCell(record.time)} | ${escapeMarkdownCell(record.ip)} | ${escapeMarkdownCell(record.imageName)} | ${escapeMarkdownCell(record.originalSize)} | ${escapeMarkdownCell(record.compressedSize)} | ${escapeMarkdownCell(record.compressionRatio)} |\n`;
   const lines = markdownContent.split('\n');
   const headerIndex = lines.findIndex(line => line.startsWith('|------|'));
   if (headerIndex !== -1) {
@@ -108,7 +153,6 @@ function appendRecord(markdownContent, record) {
   return lines.join('\n');
 }
 
-// 保存记录到 Vercel Blob
 async function saveRecords(content) {
   await put(RECORD_FILE, content, {
     access: 'public',
@@ -119,76 +163,92 @@ async function saveRecords(content) {
   console.log('记录保存成功');
 }
 
-// 主处理函数
+async function saveCompressionRecords(recordsToSave) {
+  try {
+    let content = await readRecords();
+    for (const record of recordsToSave) {
+      content = appendRecord(content, record);
+    }
+    await saveRecords(content);
+  } catch (error) {
+    console.error('保存记录过程出错:', error);
+  }
+}
+
+async function runCleanup() {
+  try {
+    const deleted = await cleanupExpiredImages();
+    if (deleted.length > 0) {
+      console.log(`已清理 ${deleted.length} 个过期图片`);
+    }
+  } catch (error) {
+    console.error('清理过期图片失败:', error);
+  }
+}
+
 module.exports = async function handler(req, res) {
-  // 仅允许 POST 请求
   if (req.method !== 'POST') {
     return res.status(405).json({ error: '仅支持 POST 请求' });
   }
 
   try {
-    const { files, fields } = await parseMultipart(req);
+    const body = await readJsonBody(req);
+    const files = Array.isArray(body.files) ? body.files.slice(0, MAX_FILES) : [];
 
-    if (!files || files.length === 0) {
+    if (files.length === 0) {
       return res.status(400).json({ error: '请上传至少一张图片' });
     }
 
-    const quality = parseInt(fields.quality) || 80;
+    const quality = clampQuality(body.quality);
     const results = [];
     const recordsToSave = [];
     const clientIP = getClientIP(req);
     const currentTime = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
 
     for (const file of files) {
-      const originalName = file.originalname.replace(/\.[^/.]+$/, '');
-      const outputFilename = `${originalName}.webp`;
-
-      // 获取原始图片元数据
-      const metadata = await sharp(file.buffer).metadata();
-
-      // 使用 sharp 压缩并转换为 webp（输出到 Buffer）
-      const outputBuffer = await sharp(file.buffer)
+      const originalName = String(file.name || 'image');
+      const originalSize = Number(file.size) || 0;
+      const originalBaseName = getBaseName(originalName);
+      const outputFilename = `${originalBaseName}.webp`;
+      const outputPathname = `compressed/${Date.now()}-${Math.random().toString(36).slice(2)}-${getSafePathSegment(outputFilename)}`;
+      const inputBuffer = await fetchSourceBuffer(file);
+      const metadata = await sharp(inputBuffer).metadata();
+      const outputBuffer = await sharp(inputBuffer)
         .webp({ quality })
         .toBuffer();
-
-      const compressionRatio = ((1 - outputBuffer.length / file.size) * 100).toFixed(1);
-
-      // 转为 Base64 供前端直接下载
-      const base64Data = outputBuffer.toString('base64');
+      const compressedBlob = await put(outputPathname, outputBuffer, {
+        access: 'public',
+        addRandomSuffix: true,
+        cacheControlMaxAge: 24 * 60 * 60,
+      });
+      const sourceSize = originalSize || inputBuffer.length;
+      const compressionRatio = ((1 - outputBuffer.length / sourceSize) * 100).toFixed(1);
 
       results.push({
-        originalName: file.originalname,
-        originalSize: file.size,
+        originalName,
+        originalSize: sourceSize,
         compressedSize: outputBuffer.length,
         compressionRatio,
         width: metadata.width,
         height: metadata.height,
         outputFilename,
-        base64: base64Data,
+        url: compressedBlob.url,
+        downloadUrl: compressedBlob.downloadUrl || compressedBlob.url,
+        expiresInHours: 24,
       });
 
-      // 收集记录
       recordsToSave.push({
         time: currentTime,
         ip: clientIP,
-        imageName: file.originalname,
-        originalSize: formatSize(file.size),
+        imageName: originalName,
+        originalSize: formatSize(sourceSize),
         compressedSize: formatSize(outputBuffer.length),
         compressionRatio: `${compressionRatio}%`,
       });
     }
 
-    // 在 Serverless 环境中，必须在响应发送前完成记录保存
-    try {
-      let content = await readRecords();
-      for (const record of recordsToSave) {
-        content = appendRecord(content, record);
-      }
-      await saveRecords(content);
-    } catch (error) {
-      console.error('保存记录过程出错:', error);
-      // 记录保存失败不影响用户体验，继续返回压缩结果
-    }
+    await saveCompressionRecords(recordsToSave);
+    await runCleanup();
 
     res.status(200).json({ success: true, results });
   } catch (error) {

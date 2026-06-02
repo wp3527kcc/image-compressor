@@ -4,6 +4,16 @@
     "api/compress.js": {
       "maxDuration": 60,
       "memory": 1024
+    },
+    "api/cleanup.js": {
+      "maxDuration": 60,
+      "memory": 512
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cleanup",
+      "schedule": "0 * * * *"
+    }
+  ]
 }

@@ -2,6 +2,8 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const compressHandler = require('./api/compress');
+const uploadHandler = require('./api/upload');
+const cleanupHandler = require('./api/cleanup');
 
 const PORT = process.env.PORT || 4000;
 
@@ -18,7 +20,15 @@ const mimeTypes = {
 
 const server = http.createServer((req, res) => {
   // API 路由
-  if (req.url === '/api/compress' && req.method === 'POST') {
+  const requestPath = new URL(req.url, `http://${req.headers.host || 'localhost'}`).pathname;
+  const apiRoutes = {
+    '/api/compress': compressHandler,
+    '/api/upload': uploadHandler,
+    '/api/cleanup': cleanupHandler,
+  };
+  const handler = apiRoutes[requestPath];
+
+  if (handler) {
     // 模拟 Vercel 的 res.status().json() 方法
     res.status = (code) => {
       res.statusCode = code;
@@ -28,7 +38,7 @@ const server = http.createServer((req, res) => {
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify(data));
     };
-    return compressHandler(req, res);
+    return handler(req, res);
   }
 
   // 静态文件服务
