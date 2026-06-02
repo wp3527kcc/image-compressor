@@ -3,3 +3,6 @@ node_modules/
 output/
 .env
 .env.local
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
