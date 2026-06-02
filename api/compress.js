@@ -25,6 +25,7 @@ function parseMultipart(req) {
   return new Promise((resolve, reject) => {
     const busboy = Busboy({
       headers: req.headers,
+      defParamCharset: 'utf8',
       limits: { fileSize: 50 * 1024 * 1024, files: 20 },
     });
 
