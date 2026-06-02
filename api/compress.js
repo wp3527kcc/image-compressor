@@ -218,7 +218,7 @@ module.exports = async function handler(req, res) {
         .toBuffer();
       const compressedBlob = await put(outputPathname, outputBuffer, {
         access: 'public',
-        addRandomSuffix: false,
+        addRandomSuffix: true,
         cacheControlMaxAge: 24 * 60 * 60,
       });
       const sourceSize = originalSize || inputBuffer.length;
