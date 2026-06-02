@@ -1,6 +1,6 @@
 const sharp = require('sharp');
 const Busboy = require('busboy');
-const { put, list, del } = require('@vercel/blob');
+const { put, list } = require('@vercel/blob');
 
 // Vercel Serverless Function 的请求体大小限制配置
 module.exports.config = {
@@ -75,16 +75,22 @@ function formatSize(bytes) {
 
 // 从 Vercel Blob 读取历史记录
 async function readRecords() {
+  const defaultContent = '# 图片压缩记录\n\n| 时间 | IP地址 | 图片名称 | 压缩前大小 | 压缩后大小 | 压缩率 |\n|------|--------|----------|------------|------------|--------|\n';
+
   try {
     const blobs = await list({ prefix: RECORD_FILE });
-    if (blobs.blobs.length === 0) {
-      return '# 图片压缩记录\n\n| 时间 | IP地址 | 图片名称 | 压缩前大小 | 压缩后大小 | 压缩率 |\n|------|--------|----------|------------|------------|--------|\n';
+    const recordBlob = blobs.blobs.find(blob => blob.pathname === RECORD_FILE);
+    if (!recordBlob) {
+      return defaultContent;
     }
-    const response = await fetch(blobs.blobs[0].url);
+    const response = await fetch(`${recordBlob.url}?t=${Date.now()}`, { cache: 'no-store' });
+    if (!response.ok) {
+      return defaultContent;
+    }
     return await response.text();
   } catch (error) {
     console.error('读取记录失败:', error);
-    return '# 图片压缩记录\n\n| 时间 | IP地址 | 图片名称 | 压缩前大小 | 压缩后大小 | 压缩率 |\n|------|--------|----------|------------|------------|--------|\n';
+    return defaultContent;
   }
 }
 
@@ -103,17 +109,12 @@ function appendRecord(markdownContent, record) {
 
 // 保存记录到 Vercel Blob
 async function saveRecords(content) {
-  // 先查找并删除已存在的记录文件
-  try {
-    const blobs = await list({ prefix: RECORD_FILE });
-    for (const blob of blobs.blobs) {
-      await del(blob.url);
-    }
-  } catch (error) {
-    console.log('删除旧记录时出错或无旧记录:', error.message);
-  }
-  // 然后创建新的记录文件
-  await put(RECORD_FILE, content, { access: 'public' });
+  await put(RECORD_FILE, content, {
+    access: 'public',
+    allowOverwrite: true,
+    addRandomSuffix: false,
+    cacheControlMaxAge: 60,
+  });
   console.log('记录保存成功');
 }
 
