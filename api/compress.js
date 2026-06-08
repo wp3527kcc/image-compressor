@@ -8,6 +8,11 @@ const { put, list } = require('@vercel/blob');
 const { cleanupExpiredImages } = require('./cleanup');
 const { applyRateLimitHeaders, checkRateLimit } = require('./rate-limit');
 
+const RECORD_LOCK_KEY = 'compression-records:lock';
+const RECORD_LOCK_TTL_SECONDS = 10;
+const RECORD_LOCK_MAX_ATTEMPTS = 20;
+const RECORD_LOCK_RETRY_DELAY_MS = 100;
+
 ffmpeg.setFfmpegPath(ffmpegPath);
 
 const RECORD_FILE = 'compression-records.md';
@@ -282,15 +287,93 @@ async function saveRecords(content) {
   console.log('记录保存成功');
 }
 
-async function saveCompressionRecords(recordsToSave) {
+function getRedisConfig() {
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) return null;
+  return {
+    url: url.replace(/\/+$/, ''),
+    token,
+  };
+}
+
+async function callRedis(command) {
+  const redis = getRedisConfig();
+  if (!redis) return null;
+
+  const response = await fetch(`${redis.url}/${command.map(encodeURIComponent).join('/')}`, {
+    headers: {
+      Authorization: `Bearer ${redis.token}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Redis 请求失败: ${response.status}`);
+  }
+
+  return response.json();
+}
+
+async function acquireRecordsLock(lockValue) {
+  const redis = getRedisConfig();
+  if (!redis) return false;
+
+  for (let attempt = 0; attempt < RECORD_LOCK_MAX_ATTEMPTS; attempt++) {
+    const result = await callRedis(['SET', RECORD_LOCK_KEY, lockValue, 'NX', 'EX', String(RECORD_LOCK_TTL_SECONDS)]);
+    if (result?.result === 'OK') return true;
+    await new Promise(resolve => setTimeout(resolve, RECORD_LOCK_RETRY_DELAY_MS));
+  }
+
+  return false;
+}
+
+async function releaseRecordsLock(lockValue) {
   try {
-    let content = await readRecords();
-    for (const record of recordsToSave) {
-      content = appendRecord(content, record);
+    await callRedis([
+      'EVAL',
+      "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+      '1',
+      RECORD_LOCK_KEY,
+      lockValue,
+    ]);
+  } catch (error) {
+    console.error('释放记录锁失败:', error);
+  }
+}
+
+async function writeCompressionRecords(recordsToSave) {
+  let content = await readRecords();
+  for (const record of recordsToSave) {
+    content = appendRecord(content, record);
+  }
+  await saveRecords(content);
+}
+
+async function saveCompressionRecords(recordsToSave) {
+  if (!getRedisConfig()) {
+    console.warn('未配置 Upstash Redis，压缩记录将使用非并发安全写入');
+    try {
+      await writeCompressionRecords(recordsToSave);
+    } catch (error) {
+      console.error('保存记录过程出错:', error);
     }
-    await saveRecords(content);
+    return;
+  }
+
+  const lockValue = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const locked = await acquireRecordsLock(lockValue);
+
+  if (!locked) {
+    console.error('保存记录失败：获取记录锁超时');
+    return;
+  }
+
+  try {
+    await writeCompressionRecords(recordsToSave);
   } catch (error) {
     console.error('保存记录过程出错:', error);
+  } finally {
+    await releaseRecordsLock(lockValue);
   }
 }
 
