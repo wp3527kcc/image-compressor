@@ -2,12 +2,10 @@
   "version": 2,
   "functions": {
     "api/compress.js": {
-      "maxDuration": 60,
-      "memory": 1024
+      "maxDuration": 60
     },
     "api/cleanup.js": {
-      "maxDuration": 60,
-      "memory": 512
+      "maxDuration": 60
     }
   },
   "crons": [

@@ -952,14 +952,8 @@
       loading.classList.add('active');
       errorEl.style.display = 'none';
 
-      const failures = [];
-      for (const index of indices) {
-        try {
-          await processItem(index);
-        } catch (error) {
-          failures.push(error.message || '处理失败');
-        }
-      }
+      const results = await Promise.allSettled(indices.map(index => processItem(index)));
+      const failures = results.filter(result => result.status === 'rejected');
 
       if (failures.length > 0) {
         errorEl.textContent = `${failures.length} 个文件处理失败，可在文件列表中单独重试。`;
