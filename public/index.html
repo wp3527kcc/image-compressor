@@ -18,23 +18,109 @@
       padding: 20px;
     }
 
+    .auth-transition {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: grid;
+      place-items: center;
+      background: rgba(17, 24, 39, 0.38);
+      backdrop-filter: blur(2px);
+      transition: opacity 0.2s ease, visibility 0.2s ease;
+    }
+
+    .auth-transition.hidden {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    .auth-transition-card {
+      width: min(360px, calc(100vw - 32px));
+      border-radius: 14px;
+      background: #fff;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.22);
+      padding: 24px 20px;
+      text-align: center;
+    }
+
+    .auth-transition-spinner {
+      width: 42px;
+      height: 42px;
+      margin: 0 auto 12px;
+      border-radius: 50%;
+      border: 4px solid #e5e7eb;
+      border-top-color: #6366f1;
+      animation: authSpin 0.9s linear infinite;
+    }
+
+    .auth-transition-title {
+      color: #111827;
+      font-size: 1rem;
+      font-weight: 700;
+    }
+
+    .auth-transition-desc {
+      color: #6b7280;
+      font-size: 0.86rem;
+      margin-top: 6px;
+    }
+
+    @keyframes authSpin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
     .container {
       max-width: 900px;
       margin: 0 auto;
     }
 
-    h1 {
-      text-align: center;
+    .page-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
       color: #fff;
+    }
+
+    .page-title {
       margin-bottom: 8px;
       font-size: 2rem;
+      line-height: 1.15;
     }
 
     .subtitle {
-      text-align: center;
-      color: rgba(255, 255, 255, 0.8);
-      margin-bottom: 30px;
+      color: rgba(255, 255, 255, 0.85);
       font-size: 0.95rem;
+    }
+
+    .header-user {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(255, 255, 255, 0.16);
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      border-radius: 999px;
+      padding: 8px 12px;
+      backdrop-filter: blur(6px);
+      flex-shrink: 0;
+    }
+
+    .header-user .auth-status {
+      color: #fff;
+      font-size: 0.9rem;
+      font-weight: 600;
+      max-width: 260px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .header-user .link-button {
+      color: #fff;
     }
 
     .card {
@@ -58,6 +144,19 @@
     .upload-area.dragover {
       border-color: #667eea;
       background: #f0f4ff;
+    }
+
+    .upload-area.disabled {
+      cursor: not-allowed;
+      opacity: 0.6;
+      background: #f9fafb;
+      border-color: #e5e7eb;
+    }
+
+    .upload-area.disabled:hover,
+    .upload-area.disabled.dragover {
+      border-color: #e5e7eb;
+      background: #f9fafb;
     }
 
     .upload-area svg {
@@ -509,12 +608,39 @@
       border-radius: 6px;
       background: #111827;
     }
+
+    @media (max-width: 860px) {
+      .page-header {
+        flex-direction: column;
+      }
+      .header-user {
+        width: 100%;
+        justify-content: space-between;
+      }
+    }
+
   </style>
 </head>
 <body>
+  <div class="auth-transition" id="authTransition">
+    <div class="auth-transition-card">
+      <div class="auth-transition-spinner"></div>
+      <div class="auth-transition-title">身份验证中</div>
+      <div class="auth-transition-desc">正在检查登录状态，请稍候...</div>
+    </div>
+  </div>
+
   <div class="container">
-    <h1>🖼️ 图片/视频压缩工具</h1>
-    <p class="subtitle">原文件直传 Vercel Blob，压缩结果保留 24 小时</p>
+    <header class="page-header">
+      <div>
+        <h1 class="page-title">🖼️ 图片/视频压缩工具</h1>
+        <p class="subtitle">登录后可上传并压缩图片/视频</p>
+      </div>
+      <div class="header-user">
+        <span class="auth-status" id="authStatus">正在检查登录状态...</span>
+        <button class="link-button" id="logoutBtn" type="button">退出登录</button>
+      </div>
+    </header>
 
     <div class="card">
       <div class="upload-area" id="uploadArea">
@@ -589,7 +715,7 @@
 
       <div class="history-panel">
         <div class="section-title">
-          <span>本地压缩历史</span>
+          <span>上传与压缩历史</span>
           <button class="link-button" id="clearHistoryBtn" type="button">清空历史</button>
         </div>
         <div class="history-list" id="historyList"></div>
@@ -599,14 +725,11 @@
 
   <script type="module">
     import JSZip from 'https://esm.sh/jszip@3.10.1';
-    import { upload } from 'https://esm.sh/@vercel/blob@0.23.3/client';
 
     const STORAGE_KEYS = {
       preferences: 'image-compressor:preferences:v1',
-      history: 'image-compressor:history:v1',
     };
     const MAX_FILES = 20;
-    const MAX_HISTORY = 50;
 
     const uploadArea = document.getElementById('uploadArea');
     const fileInput = document.getElementById('fileInput');
@@ -628,10 +751,16 @@
     const todaySavedSize = document.getElementById('todaySavedSize');
     const historyList = document.getElementById('historyList');
     const clearHistoryBtn = document.getElementById('clearHistoryBtn');
+    const logoutBtn = document.getElementById('logoutBtn');
+    const authStatus = document.getElementById('authStatus');
+    const authTransition = document.getElementById('authTransition');
 
     let selectedFiles = [];
     let latestResults = [];
+    let historyEntries = [];
     let isProcessing = false;
+    let authUser = null;
+    let authLoading = false;
 
     const statusLabels = {
       pending: '待处理',
@@ -640,6 +769,87 @@
       done: '已完成',
       failed: '失败',
     };
+
+    function redirectToLogin() {
+      const next = `${window.location.pathname}${window.location.search}`;
+      window.location.replace(`/login?next=${encodeURIComponent(next)}`);
+    }
+
+    function setAuthTransitionVisible(visible) {
+      authTransition.classList.toggle('hidden', !visible);
+    }
+
+    function updateAuthUI() {
+      const loggedIn = Boolean(authUser);
+      authStatus.textContent = loggedIn ? `当前用户：${authUser.email}` : '未登录';
+      logoutBtn.style.display = loggedIn ? 'inline-block' : 'none';
+      logoutBtn.disabled = !loggedIn || authLoading;
+
+      uploadArea.classList.toggle('disabled', !loggedIn);
+      updateCompressButton();
+    }
+
+    function requireAuthOrThrow() {
+      if (!authUser) {
+        redirectToLogin();
+        throw new Error('请先登录后再操作');
+      }
+    }
+
+    async function refreshCurrentUser(silent = false) {
+      let redirectedToLogin = false;
+      setAuthTransitionVisible(true);
+      authLoading = true;
+      updateAuthUI();
+      try {
+        const response = await fetch('/api/auth/me');
+        if (!response.ok) {
+          authUser = null;
+          if (response.status === 401) {
+            redirectedToLogin = true;
+            redirectToLogin();
+            return;
+          }
+          if (!silent) {
+            throw new Error('获取登录状态失败，请稍后重试。');
+          }
+          return;
+        }
+        const data = await response.json().catch(() => ({}));
+        authUser = data.user || null;
+        await loadHistory();
+      } catch (error) {
+        if (!silent) {
+          errorEl.textContent = error.message || '获取登录状态失败，请稍后重试。';
+          errorEl.style.display = 'block';
+        }
+      } finally {
+        authLoading = false;
+        updateAuthUI();
+        if (!redirectedToLogin) {
+          setAuthTransitionVisible(false);
+        }
+      }
+    }
+
+    async function logout() {
+      authLoading = true;
+      updateAuthUI();
+      try {
+        await fetch('/api/auth/logout', { method: 'POST' });
+        historyEntries = [];
+        renderHistory();
+        renderTodayStats();
+        redirectToLogin();
+        return;
+      } catch (error) {
+        errorEl.textContent = '退出登录失败，请稍后重试。';
+        errorEl.style.display = 'block';
+      } finally {
+        authLoading = false;
+        updateAuthUI();
+      }
+    }
 
     function safeReadJSON(key, fallback) {
       try {
@@ -683,10 +893,6 @@
         .replace(/_+/g, '_')
         .replace(/^_+|_+$/g, '')
         .slice(0, 120) || 'image';
-    }
-
-    function getUploadPath(file) {
-      return `uploads/${Date.now()}-${Math.random().toString(36).slice(2)}-${sanitizePathSegment(file.name)}`;
     }
 
     function getSelectedImageFormat() {
@@ -735,39 +941,61 @@
       qualityValue.textContent = qualitySlider.value + '%';
     }
 
-    function getHistory() {
-      return safeReadJSON(STORAGE_KEYS.history, []);
+    async function loadHistory() {
+      if (!authUser) {
+        historyEntries = [];
+        renderHistory();
+        renderTodayStats();
+        return;
+      }
+
+      const response = await fetch('/api/history?limit=100');
+      if (response.status === 401) {
+        authUser = null;
+        updateAuthUI();
+        redirectToLogin();
+        return;
+      }
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || '读取历史记录失败');
+      }
+
+      historyEntries = Array.isArray(data.history) ? data.history : [];
+      renderHistory();
+      renderTodayStats();
     }
 
-    function saveHistory(history) {
-      safeWriteJSON(STORAGE_KEYS.history, history.slice(0, MAX_HISTORY));
-    }
+    async function clearHistory() {
+      if (!authUser) {
+        redirectToLogin();
+        return;
+      }
 
-    function addHistoryEntry(result) {
-      const savedBytes = Math.max(0, (Number(result.originalSize) || 0) - (Number(result.compressedSize) || 0));
-      const now = new Date();
-      const entry = {
-        id: `${now.getTime()}-${Math.random().toString(36).slice(2)}`,
-        time: now.toISOString(),
-        dayKey: getLocalDateKey(now),
-        mediaType: result.mediaType,
-        originalName: result.originalName,
-        originalSize: result.originalSize,
-        compressedSize: result.compressedSize,
-        savedBytes,
-        compressionRatio: result.compressionRatio,
-        outputFormat: result.outputFormat,
-        outputFilename: result.outputFilename,
-        downloadUrl: result.downloadUrl || result.url,
-      };
-      saveHistory([entry, ...getHistory()]);
+      const response = await fetch('/api/history', { method: 'DELETE' });
+      if (response.status === 401) {
+        authUser = null;
+        updateAuthUI();
+        redirectToLogin();
+        return;
+      }
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || '清空历史失败');
+      }
+      historyEntries = [];
       renderHistory();
       renderTodayStats();
     }
 
     function renderTodayStats() {
       const today = getLocalDateKey();
-      const todayEntries = getHistory().filter(entry => entry.dayKey === today);
+      const todayEntries = historyEntries.filter(entry => {
+        if (entry.eventType !== 'compress') return false;
+        const createdAt = new Date(entry.createdAt);
+        if (Number.isNaN(createdAt.getTime())) return false;
+        return getLocalDateKey(createdAt) === today;
+      });
       const imageCount = todayEntries.filter(entry => entry.mediaType === 'image').length;
       const videoCount = todayEntries.filter(entry => entry.mediaType === 'video').length;
       const savedBytes = todayEntries.reduce((sum, entry) => sum + (Number(entry.savedBytes) || 0), 0);
@@ -778,20 +1006,22 @@
     }
 
     function renderHistory() {
-      const history = getHistory();
-      if (history.length === 0) {
-        historyList.innerHTML = '<div class="history-empty">暂无本地历史记录</div>';
+      const compressionHistory = historyEntries.filter(entry => entry.eventType === 'compress');
+      if (compressionHistory.length === 0) {
+        historyList.innerHTML = '<div class="history-empty">暂无历史记录</div>';
         return;
       }
 
-      historyList.innerHTML = history.slice(0, 10).map(entry => {
-        const time = new Date(entry.time).toLocaleString('zh-CN');
+      historyList.innerHTML = compressionHistory.slice(0, 20).map(entry => {
+        const time = new Date(entry.createdAt).toLocaleString('zh-CN');
         const mediaLabel = entry.mediaType === 'video' ? '视频' : '图片';
+        const sizeSummary = `${formatSize(entry.originalSize)} → ${formatSize(entry.compressedSize)} · 节省 ${formatSize(entry.savedBytes)}`;
+        const title = `${escapeHTML(entry.originalName)} → ${escapeHTML(entry.outputFilename || '输出文件')}`;
         return `
           <div class="history-item">
             <div>
-              <div class="title">${escapeHTML(entry.originalName)} → ${escapeHTML(entry.outputFilename)}</div>
-              <div class="meta">${escapeHTML(time)} · ${mediaLabel} · ${formatSize(entry.originalSize)} → ${formatSize(entry.compressedSize)} · 节省 ${formatSize(entry.savedBytes)}</div>
+              <div class="title">${title}</div>
+              <div class="meta">${escapeHTML(time)} · 压缩 · ${mediaLabel} · ${sizeSummary}</div>
             </div>
             <button type="button" class="link-button" onclick="downloadHistoryItem('${escapeHTML(entry.id)}')">下载</button>
           </div>
@@ -800,7 +1030,7 @@
     }
 
     function updateCompressButton() {
-      compressBtn.disabled = isProcessing || selectedFiles.length === 0;
+      compressBtn.disabled = !authUser || isProcessing || selectedFiles.length === 0;
     }
 
     function createFileItem(file) {
@@ -816,6 +1046,10 @@
     }
 
     function addFiles(files) {
+      if (!authUser) {
+        redirectToLogin();
+        return;
+      }
       const mediaFiles = files.filter(file => file.type.startsWith('image/') || file.type.startsWith('video/'));
       const remainingSlots = MAX_FILES - selectedFiles.length;
       selectedFiles = [...selectedFiles, ...mediaFiles.slice(0, remainingSlots).map(createFileItem)];
@@ -878,28 +1112,46 @@
       });
     }
 
-    async function uploadFileToBlob(item, index) {
+    async function uploadFileToServer(item, index) {
+      requireAuthOrThrow();
       if (item.uploadedFile) return item.uploadedFile;
 
       setItemStatus(index, 'uploading', '');
       loadingText.textContent = `正在上传 ${index + 1}/${selectedFiles.length}：${item.file.name}`;
-      const blob = await upload(getUploadPath(item.file), item.file, {
-        access: 'public',
-        handleUploadUrl: '/api/upload',
+      const formData = new FormData();
+      formData.append('file', item.file, item.file.name);
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
       });
+      const data = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        authUser = null;
+        updateAuthUI();
+        redirectToLogin();
+        throw new Error('登录状态已失效，请重新登录');
+      }
+      if (!response.ok) {
+        throw new Error(data.error || '上传失败');
+      }
+      const uploaded = data.file;
+      if (!uploaded?.url) {
+        throw new Error('上传返回数据无效');
+      }
 
       item.uploadedFile = {
         name: item.file.name,
         size: item.file.size,
         type: item.file.type,
-        url: blob.url,
-        downloadUrl: blob.downloadUrl || blob.url,
-        pathname: blob.pathname,
+        url: uploaded.url,
+        downloadUrl: uploaded.downloadUrl || uploaded.url,
+        pathname: uploaded.pathname,
       };
       return item.uploadedFile;
     }
 
     async function compressUploadedFile(uploadedFile, index) {
+      requireAuthOrThrow();
       setItemStatus(index, 'compressing', '');
       loadingText.textContent = `正在压缩 ${index + 1}/${selectedFiles.length}：${uploadedFile.name}`;
       const response = await fetch('/api/compress', {
@@ -914,6 +1166,12 @@
       });
       const data = await response.json();
 
+      if (response.status === 401) {
+        authUser = null;
+        updateAuthUI();
+        redirectToLogin();
+        throw new Error('登录状态已失效，请重新登录');
+      }
       if (!response.ok) {
         throw new Error(data.error || '压缩失败');
       }
@@ -926,7 +1184,7 @@
       if (!item) return null;
 
       try {
-        const uploadedFile = await uploadFileToBlob(item, index);
+        const uploadedFile = await uploadFileToServer(item, index);
         const result = await compressUploadedFile(uploadedFile, index);
         if (!result) throw new Error('压缩结果为空');
 
@@ -935,7 +1193,6 @@
         setItemStatus(index, 'done', '');
         latestResults = [...latestResults.filter(entry => entry.localId !== item.id), enrichedResult];
         renderResults(latestResults);
-        addHistoryEntry(enrichedResult);
         return enrichedResult;
       } catch (error) {
         item.result = null;
@@ -946,6 +1203,10 @@
 
     async function processSelectedFiles(indices) {
       if (indices.length === 0) return;
+      if (!authUser) {
+        redirectToLogin();
+        return;
+      }
 
       isProcessing = true;
       updateCompressButton();
@@ -957,6 +1218,13 @@
 
       if (failures.length > 0) {
         errorEl.textContent = `${failures.length} 个文件处理失败，可在文件列表中单独重试。`;
+        errorEl.style.display = 'block';
+      }
+
+      try {
+        await loadHistory();
+      } catch (error) {
+        errorEl.textContent = error.message || '刷新历史记录失败';
         errorEl.style.display = 'block';
       }
 
@@ -1034,9 +1302,9 @@
     }
 
     function downloadHistoryItem(id) {
-      const item = getHistory().find(entry => entry.id === id);
+      const item = historyEntries.find(entry => entry.id === id);
       if (!item?.downloadUrl) return;
-      downloadFile(item.downloadUrl, item.outputFilename);
+      downloadFile(item.downloadUrl, item.outputFilename || item.originalName || 'download');
     }
 
     function renderResults(results) {
@@ -1065,15 +1333,26 @@
     }
 
     compressBtn.addEventListener('click', () => {
+      if (!authUser) {
+        redirectToLogin();
+        return;
+      }
       latestResults = [];
       renderResults([]);
       const indices = selectedFiles.map((item, index) => index);
       processSelectedFiles(indices);
     });
 
-    uploadArea.addEventListener('click', () => fileInput.click());
+    uploadArea.addEventListener('click', () => {
+      if (!authUser) {
+        redirectToLogin();
+        return;
+      }
+      fileInput.click();
+    });
     uploadArea.addEventListener('dragover', (event) => {
       event.preventDefault();
+      if (!authUser) return;
       uploadArea.classList.add('dragover');
     });
     uploadArea.addEventListener('dragleave', () => {
@@ -1082,6 +1361,10 @@
     uploadArea.addEventListener('drop', (event) => {
       event.preventDefault();
       uploadArea.classList.remove('dragover');
+      if (!authUser) {
+        redirectToLogin();
+        return;
+      }
       addFiles(Array.from(event.dataTransfer.files));
     });
     fileInput.addEventListener('change', () => {
@@ -1099,14 +1382,22 @@
     maxWidthInput.addEventListener('input', savePreferences);
     maxHeightInput.addEventListener('input', savePreferences);
     downloadAllBtn.addEventListener('click', downloadAllResults);
-    clearHistoryBtn.addEventListener('click', () => {
-      saveHistory([]);
-      renderHistory();
-      renderTodayStats();
+    clearHistoryBtn.addEventListener('click', async () => {
+      try {
+        await clearHistory();
+      } catch (error) {
+        errorEl.textContent = error.message || '清空历史失败';
+        errorEl.style.display = 'block';
+      }
     });
+    logoutBtn.addEventListener('click', logout);
 
     window.removeFile = removeFile;
     window.retryFile = index => {
+      if (!authUser) {
+        redirectToLogin();
+        return;
+      }
       if (!isProcessing) processSelectedFiles([index]);
     };
     window.downloadResult = downloadResult;
@@ -1115,6 +1406,8 @@
     loadPreferences();
     renderHistory();
     renderTodayStats();
+    updateAuthUI();
+    refreshCurrentUser(true);
     updateCompressButton();
   </script>
 </body>

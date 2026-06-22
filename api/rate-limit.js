@@ -7,6 +7,14 @@ const DEFAULT_LIMITS = {
     limit: 20,
     windowSeconds: 60 * 60,
   },
+  auth_register: {
+    limit: 10,
+    windowSeconds: 60 * 60,
+  },
+  auth_login: {
+    limit: 30,
+    windowSeconds: 60 * 60,
+  },
 };
 
 function getClientIP(req) {

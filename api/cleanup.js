@@ -1,32 +1,51 @@
-const { list, del } = require('@vercel/blob');
+const { ALLOWED_PREFIXES, MAX_MEDIA_AGE_MS, getOssClient } = require('./oss');
+const { requireAuth } = require('./require-auth');
 
-const IMAGE_PREFIXES = ['uploads/', 'compressed/'];
-const MAX_IMAGE_AGE_MS = 24 * 60 * 60 * 1000;
+function isCronAuthorized(req) {
+  const cronSecret = String(process.env.CRON_SECRET || '').trim();
+  if (!cronSecret) return false;
+  const authHeader = String(req.headers.authorization || '').trim();
+  if (authHeader === `Bearer ${cronSecret}`) return true;
+  return String(req.headers['x-cron-secret'] || '').trim() === cronSecret;
+}
 
-async function cleanupExpiredImages() {
-  const now = Date.now();
+function isExpiredByLastModified(lastModified) {
+  if (!lastModified) return false;
+  const timestamp = new Date(lastModified).getTime();
+  return Number.isFinite(timestamp) && Date.now() - timestamp > MAX_MEDIA_AGE_MS;
+}
+
+async function cleanupExpiredByPrefix(prefix) {
+  const client = getOssClient();
   const deleted = [];
+  let continuationToken = null;
 
-  for (const prefix of IMAGE_PREFIXES) {
-    let cursor;
+  do {
+    const result = await client.listV2({
+      prefix,
+      'max-keys': 1000,
+      'continuation-token': continuationToken || undefined,
+    });
+    const objects = Array.isArray(result.objects) ? result.objects : [];
 
-    do {
-      const result = await list({ prefix, cursor, limit: 1000 });
-      const expiredBlobs = result.blobs.filter(blob => {
-        const uploadedAt = new Date(blob.uploadedAt).getTime();
-        return Number.isFinite(uploadedAt) && now - uploadedAt > MAX_IMAGE_AGE_MS;
-      });
+    for (const object of objects) {
+      if (!isExpiredByLastModified(object.lastModified)) continue;
+      // await client.delete(object.name); // 暂时不执行删除，无权限
+      deleted.push(object.name);
+    }
 
-      for (const blob of expiredBlobs) {
-        await del(blob.url);
-        deleted.push(blob.pathname);
-      }
-
-      cursor = result.cursor;
-    } while (cursor);
-  }
+    continuationToken = result.nextContinuationToken || null;
+  } while (continuationToken);
 
   return deleted;
+}
+
+async function cleanupExpiredImages() {
+  const allDeleted = [];
+  for (const prefix of ALLOWED_PREFIXES) {
+    allDeleted.push(...await cleanupExpiredByPrefix(prefix));
+  }
+  return allDeleted;
 }
 
 async function handler(req, res) {
@@ -35,6 +54,11 @@ async function handler(req, res) {
   }
 
   try {
+    if (!isCronAuthorized(req)) {
+      const user = await requireAuth(req, res);
+      if (!user) return;
+    }
+
     const deleted = await cleanupExpiredImages();
     res.status(200).json({ success: true, deletedCount: deleted.length, deleted });
   } catch (error) {

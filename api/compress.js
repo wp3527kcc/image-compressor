@@ -4,9 +4,18 @@ const path = require('path');
 const sharp = require('sharp');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
-const { put, list } = require('@vercel/blob');
 const { cleanupExpiredImages } = require('./cleanup');
 const { applyRateLimitHeaders, checkRateLimit } = require('./rate-limit');
+const { requireAuth } = require('./require-auth');
+const { addCompressionHistory } = require('./history-service');
+const {
+  MAX_MEDIA_AGE_HOURS,
+  buildObjectKey,
+  extractObjectKeyFromInput,
+  getOssClient,
+  getPublicUrlByKey,
+  sanitizeObjectName,
+} = require('./oss');
 
 const RECORD_LOCK_KEY = 'compression-records:lock';
 const RECORD_LOCK_TTL_SECONDS = 10;
@@ -15,7 +24,7 @@ const RECORD_LOCK_RETRY_DELAY_MS = 100;
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-const RECORD_FILE = 'compression-records.md';
+const RECORD_FILE = 'logs/compression-records.md';
 const MAX_JSON_BODY_SIZE = 1024 * 1024;
 const MAX_FILES = 20;
 const MAX_IMAGE_SIZE = 50 * 1024 * 1024;
@@ -110,29 +119,10 @@ function normalizeMediaType(file) {
   return 'image';
 }
 
-function isAllowedBlobUrl(value) {
-  try {
-    const url = new URL(value);
-    return url.protocol === 'https:' && url.hostname.endsWith('.vercel-storage.com');
-  } catch (error) {
-    return false;
-  }
-}
-
 function getBaseName(filename) {
   const name = String(filename || 'media').replace(/[\\/]/g, '_');
   const baseName = name.replace(/\.[^/.]+$/, '').trim();
   return baseName || 'media';
-}
-
-function getSafePathSegment(value) {
-  return String(value || 'media')
-    .normalize('NFKC')
-    .replace(/[\\/:*?"<>|#%{}^~[\]`\r\n\t]+/g, '_')
-    .replace(/\s+/g, '_')
-    .replace(/_+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .slice(0, 120) || 'media';
 }
 
 function escapeMarkdownCell(value) {
@@ -142,28 +132,39 @@ function escapeMarkdownCell(value) {
     .trim();
 }
 
+async function getObjectBuffer(objectKey, maxSize) {
+  const client = getOssClient();
+  const result = await client.getStream(objectKey);
+  const stream = result.stream;
+  const chunks = [];
+  let total = 0;
+
+  await new Promise((resolve, reject) => {
+    stream.on('data', chunk => {
+      total += chunk.length;
+      if (total > maxSize) {
+        stream.destroy(new Error(`媒体大小超过 ${formatSize(maxSize)} 限制`));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    stream.on('end', resolve);
+    stream.on('error', reject);
+  });
+
+  return Buffer.concat(chunks);
+}
+
 async function fetchSourceBuffer(file, maxSize) {
-  const sourceUrl = file.downloadUrl || file.url;
-  if (!isAllowedBlobUrl(sourceUrl)) {
-    throw new Error('媒体地址不合法');
+  const objectKey = extractObjectKeyFromInput(file);
+  try {
+    return await getObjectBuffer(objectKey, maxSize);
+  } catch (error) {
+    if (error?.name === 'NoSuchKeyError' || error?.code === 'NoSuchKey' || error?.status === 404) {
+      throw new Error('读取媒体失败: 文件不存在');
+    }
+    throw error;
   }
-
-  const response = await fetch(sourceUrl, { cache: 'no-store' });
-  if (!response.ok) {
-    throw new Error(`读取媒体失败: ${response.status}`);
-  }
-
-  const contentLength = Number(response.headers.get('content-length'));
-  if (Number.isFinite(contentLength) && contentLength > maxSize) {
-    throw new Error(`媒体大小超过 ${formatSize(maxSize)} 限制`);
-  }
-
-  const arrayBuffer = await response.arrayBuffer();
-  if (arrayBuffer.byteLength > maxSize) {
-    throw new Error(`媒体大小超过 ${formatSize(maxSize)} 限制`);
-  }
-
-  return Buffer.from(arrayBuffer);
 }
 
 function convertImage(inputBuffer, format, quality, resizeOptions) {
@@ -245,21 +246,19 @@ async function readRecords() {
   const defaultContent = '# 压缩记录\n\n| 时间 | IP地址 | 类型 | 文件名称 | 压缩前大小 | 压缩后大小 | 压缩率 |\n|------|--------|------|----------|------------|------------|--------|\n';
 
   try {
-    const blobs = await list({ prefix: RECORD_FILE });
-    const recordBlob = blobs.blobs.find(blob => blob.pathname === RECORD_FILE);
-    if (!recordBlob) {
-      return defaultContent;
-    }
-    const response = await fetch(`${recordBlob.url}?t=${Date.now()}`, { cache: 'no-store' });
-    if (!response.ok) {
-      return defaultContent;
-    }
-    const content = await response.text();
+    const client = getOssClient();
+    const record = await client.get(RECORD_FILE);
+    const content = Buffer.isBuffer(record.content)
+      ? record.content.toString('utf8')
+      : String(record.content || '');
     if (!content.includes('| 类型 |')) {
       return defaultContent;
     }
     return content;
   } catch (error) {
+    if (error?.name === 'NoSuchKeyError' || error?.code === 'NoSuchKey' || error?.status === 404) {
+      return defaultContent;
+    }
     console.error('读取记录失败:', error);
     return defaultContent;
   }
@@ -278,11 +277,13 @@ function appendRecord(markdownContent, record) {
 }
 
 async function saveRecords(content) {
-  await put(RECORD_FILE, content, {
-    access: 'public',
-    allowOverwrite: true,
-    addRandomSuffix: false,
-    cacheControlMaxAge: 60,
+  const client = getOssClient();
+  await client.put(RECORD_FILE, Buffer.from(content, 'utf8'), {
+    mime: 'text/markdown; charset=utf-8',
+    headers: {
+      'Content-Type': 'text/markdown; charset=utf-8',
+      'Cache-Control': 'no-cache',
+    },
   });
   console.log('记录保存成功');
 }
@@ -393,15 +394,18 @@ async function processImage(file, inputBuffer, quality, imageFormat, resizeOptio
   const originalSize = Number(file.size) || inputBuffer.length;
   const formatConfig = IMAGE_FORMATS[imageFormat];
   const outputFilename = `${getBaseName(originalName)}.${formatConfig.extension}`;
-  const outputPathname = `compressed/${getSafePathSegment(outputFilename)}`;
   const outputBuffer = await convertImage(inputBuffer, imageFormat, quality, resizeOptions);
   const metadata = await sharp(outputBuffer).metadata();
-  const compressedBlob = await put(outputPathname, outputBuffer, {
-    access: 'public',
-    addRandomSuffix: true,
-    contentType: formatConfig.contentType,
-    cacheControlMaxAge: 24 * 60 * 60,
+  const objectKey = buildObjectKey('compressor/compressedFiles/', sanitizeObjectName(outputFilename, 'compressed'));
+  const client = getOssClient();
+  await client.put(objectKey, outputBuffer, {
+    mime: formatConfig.contentType,
+    headers: {
+      'Content-Type': formatConfig.contentType,
+      'Cache-Control': 'public, max-age=86400',
+    },
   });
+  const publicUrl = getPublicUrlByKey(objectKey);
 
   return {
     result: {
@@ -414,9 +418,10 @@ async function processImage(file, inputBuffer, quality, imageFormat, resizeOptio
       height: metadata.height,
       outputFilename,
       outputFormat: imageFormat,
-      url: compressedBlob.url,
-      downloadUrl: compressedBlob.downloadUrl || compressedBlob.url,
-      expiresInHours: 24,
+      url: publicUrl,
+      downloadUrl: publicUrl,
+      pathname: objectKey,
+      expiresInHours: MAX_MEDIA_AGE_HOURS,
     },
     recordType: '图片',
   };
@@ -426,14 +431,17 @@ async function processVideo(file, inputBuffer, quality) {
   const originalName = String(file.name || 'video');
   const originalSize = Number(file.size) || inputBuffer.length;
   const outputFilename = `${getBaseName(originalName)}.mp4`;
-  const outputPathname = `compressed/${getSafePathSegment(outputFilename)}`;
   const outputBuffer = await compressVideo(inputBuffer, quality);
-  const compressedBlob = await put(outputPathname, outputBuffer, {
-    access: 'public',
-    addRandomSuffix: true,
-    contentType: 'video/mp4',
-    cacheControlMaxAge: 24 * 60 * 60,
+  const objectKey = buildObjectKey('compressor/compressedFiles/', sanitizeObjectName(outputFilename, 'compressed'));
+  const client = getOssClient();
+  await client.put(objectKey, outputBuffer, {
+    mime: 'video/mp4',
+    headers: {
+      'Content-Type': 'video/mp4',
+      'Cache-Control': 'public, max-age=86400',
+    },
   });
+  const publicUrl = getPublicUrlByKey(objectKey);
 
   return {
     result: {
@@ -444,9 +452,10 @@ async function processVideo(file, inputBuffer, quality) {
       compressionRatio: ((1 - outputBuffer.length / originalSize) * 100).toFixed(1),
       outputFilename,
       outputFormat: 'mp4',
-      url: compressedBlob.url,
-      downloadUrl: compressedBlob.downloadUrl || compressedBlob.url,
-      expiresInHours: 24,
+      url: publicUrl,
+      downloadUrl: publicUrl,
+      pathname: objectKey,
+      expiresInHours: MAX_MEDIA_AGE_HOURS,
     },
     recordType: '视频',
   };
@@ -458,6 +467,9 @@ module.exports = async function handler(req, res) {
   }
 
   try {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
     const rateLimit = await checkRateLimit(req, 'compress');
     applyRateLimitHeaders(res, rateLimit);
     if (rateLimit.limited) {
@@ -488,6 +500,7 @@ module.exports = async function handler(req, res) {
         : await processImage(file, inputBuffer, quality, imageFormat, resizeOptions);
       const { result, recordType } = processed;
 
+      await addCompressionHistory(user.id, file, result);
       results.push(result);
       recordsToSave.push({
         time: currentTime,

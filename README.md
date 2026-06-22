@@ -1,78 +1,97 @@
 # 图片/视频压缩工具
 
-一个面向 Vercel 部署的在线媒体压缩工具。前端将原文件直传到 Vercel Blob，后端 Serverless Function 再从 Blob 拉取文件进行压缩，并将压缩结果回写到 Blob。原文件和压缩结果默认保留 24 小时。
+一个基于 Vercel Serverless Functions 的媒体压缩服务，已接入完整鉴权：
+
+- 用户必须注册、完成邮箱验证并登录后，才能使用上传与压缩功能。
+- 原文件和压缩结果均存储在阿里云 OSS。
+- 用户数据与邮箱验证数据存储在 NeonDB。
+- 登录态（Session）存储在 Redis。
 
 ## 功能特性
 
-- 支持点击上传和拖拽上传。
+- 注册 / 登录 / 登出 / 当前登录态查询。
+- 注册时发送邮箱验证邮件，未验证邮箱禁止登录。
 - 支持批量处理，最多 20 个文件。
-- 支持图片格式：JPEG、PNG、GIF、BMP、TIFF、WebP。
-- 支持视频格式：MP4、WebM、MOV、AVI。
-- 支持压缩质量调节，范围 1-100，默认 80。
-- 图片可输出为 WebP、JPEG、PNG、AVIF。
-- 视频统一输出为 MP4。
-- 支持图片缩略图和视频预览。
+- 图片支持 JPEG、PNG、GIF、BMP、TIFF、WebP。
+- 视频支持 MP4、WebM、MOV、AVI。
+- 图片输出支持 WebP、JPEG、PNG、AVIF；视频输出为 MP4。
+- 支持压缩质量和图片最大宽高设置。
 - 支持单个下载和打包下载 ZIP。
-- 自动展示原大小、压缩后大小、压缩率、图片尺寸和结果保留时间。
-- 支持图片最大宽度、最大高度限制，避免放大原图。
-- 基于 `localStorage` 保存压缩偏好和最近压缩历史。
-- 展示当日累计处理图片数量、视频数量和节省空间。
-- 支持文件级上传/压缩状态展示，失败文件可单独重试。
-- 支持基于 Redis 的 IP 限流，保护上传授权和压缩接口。
-- 自动清理超过 24 小时的上传文件和压缩结果。
+- 上传、压缩、注册、登录接口支持基于 Redis 的 IP 限流。
+- 自动清理 OSS 中超过 24 小时的 `uploads/` 与 `compressed/` 文件。
+- 用户上传与压缩历史写入 NeonDB（不再使用浏览器本地历史存储）。
 
 ## 技术栈
 
-- **前端**：原生 HTML/CSS/JavaScript
-- **上传**：`@vercel/blob/client`
-- **打包下载**：JSZip
-- **后端**：Vercel Serverless Functions
-- **存储**：Vercel Blob
-- **限流**：Upstash Redis REST API
-- **图片处理**：Sharp
-- **视频处理**：fluent-ffmpeg + ffmpeg-static
-- **本地开发**：Node.js 自定义开发服务器
+- 前端：原生 HTML/CSS/JavaScript
+- 后端：Node.js + Vercel Functions
+- 对象存储：阿里云 OSS
+- 数据库：Neon PostgreSQL
+- 会话与限流：Upstash Redis REST API
+- 邮件：SMTP（`nodemailer`）
+- 图片处理：Sharp
+- 视频处理：fluent-ffmpeg + ffmpeg-static
 
 ## 项目结构
 
 ```text
 image-compressor/
 ├── api/
-│   ├── upload.js         # Vercel Blob 客户端上传授权
-│   ├── compress.js       # 媒体压缩接口
-│   ├── cleanup.js        # 过期 Blob 清理接口
-│   └── rate-limit.js     # Redis IP 限流工具
+│   ├── auth/                 # 注册/登录/邮箱验证接口
+│   ├── auth-service.js       # 用户与邮箱验证业务
+│   ├── session.js            # Redis Session 与 Cookie
+│   ├── require-auth.js       # 接口鉴权守卫
+│   ├── db.js                 # NeonDB 连接与表结构初始化
+│   ├── mailer.js             # SMTP 发信
+│   ├── upload.js             # 上传到 OSS
+│   ├── compress.js           # 读取 OSS 压缩并写回 OSS
+│   ├── cleanup.js            # 清理过期 OSS 文件
+│   ├── history.js            # 用户历史查询/清空接口
+│   ├── history-service.js    # 上传与压缩历史写库逻辑
+│   └── rate-limit.js         # Redis 限流
+├── migrations/
+│   └── 001_auth.sql          # 用户与邮箱验证表结构
 ├── public/
-│   └── index.html        # 前端页面
-├── dev-server.js         # 本地开发服务器
-├── vercel.json           # Vercel 函数资源和 Cron 配置
-├── package.json
-└── .gitignore
+│   ├── index.html            # 主业务页面（需登录）
+│   ├── login.html            # 登录页
+│   └── register.html         # 注册页
+├── dev-server.js
+├── vercel.json
+└── package.json
 ```
 
-## 本地开发
+## 环境变量
+
+### OSS
 
 ```bash
-# 安装依赖
-pnpm install
-
-# 启动本地开发服务器
-pnpm dev
+UMI_APP_OSS_ACCESS_KEY=your_access_key_id
+UMI_APP_OSS_SECRET_KEY=your_access_key_secret
+UMI_APP_OSS_BUCKET=your_bucket
+UMI_APP_OSS_REGION=oss-cn-shanghai
+# 可选
+UMI_APP_OSS_ENDPOINT=
+UMI_APP_OSS_PUBLIC_URL=
 ```
 
-默认访问地址：
-
-```text
-http://localhost:4000
-```
-
-本地运行上传和压缩功能需要配置 Vercel Blob 读写令牌：
+### NeonDB
 
 ```bash
-BLOB_READ_WRITE_TOKEN=your_vercel_blob_token
+DATABASE_URL=postgres://...
 ```
 
-如果需要在本地验证 IP 限流，还需要配置 Upstash Redis：
+### 邮件（SMTP）
+
+```bash
+SMTP_HOST=smtp.example.com
+SMTP_PORT=465
+SMTP_USER=your_user
+SMTP_PASS=your_password_or_app_token
+SMTP_FROM="压缩服务 <noreply@example.com>"
+APP_BASE_URL=https://your-domain.com
+```
+
+### Redis（Session + 限流）
 
 ```bash
 UPSTASH_REDIS_REST_URL=https://your-redis.upstash.io
@@ -81,127 +100,57 @@ UPLOAD_RATE_LIMIT=60
 UPLOAD_RATE_LIMIT_WINDOW_SECONDS=3600
 COMPRESS_RATE_LIMIT=20
 COMPRESS_RATE_LIMIT_WINDOW_SECONDS=3600
+AUTH_REGISTER_RATE_LIMIT=10
+AUTH_REGISTER_RATE_LIMIT_WINDOW_SECONDS=3600
+AUTH_LOGIN_RATE_LIMIT=30
+AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS=3600
 ```
 
-未配置 Redis 时，本地开发会跳过限流，不影响页面调试。
+### 定时清理（可选）
 
-## 部署到 Vercel
-
-### 方式一：通过 Vercel CLI
+若使用 Vercel Cron，建议配置：
 
 ```bash
-vercel
+CRON_SECRET=your_cron_secret
 ```
 
-### 方式二：通过 GitHub 集成
+`/api/cleanup` 会优先接受 `Authorization: Bearer <CRON_SECRET>` 或 `x-cron-secret` 头部，满足后可跳过登录态校验。
 
-1. 将项目推送到 GitHub。
-2. 在 Vercel Dashboard 导入项目。
-3. 创建并绑定 Vercel Blob Store。
-4. 配置 `BLOB_READ_WRITE_TOKEN` 环境变量。
-5. 配置 Upstash Redis 环境变量以启用 IP 限流。
-6. 触发部署。
+## 本地开发
 
-## API 接口
-
-### POST `/api/upload`
-
-用于 `@vercel/blob/client` 直传文件前的服务端授权。
-
-限制：
-
-- 上传路径必须以 `uploads/` 开头。
-- 单个文件最大 100MB。
-- 允许图片和视频 MIME 类型。
-- 上传文件会添加随机后缀，缓存时间为 24 小时。
-- 默认 IP 限流：每小时 60 次上传授权请求，可通过 `UPLOAD_RATE_LIMIT` 调整。
-
-### POST `/api/compress`
-
-压缩已经上传到 Vercel Blob 的图片或视频。
-
-请求体为 JSON：
-
-```json
-{
-  "quality": 80,
-  "imageFormat": "webp",
-  "imageResize": {
-    "maxWidth": 1920,
-    "maxHeight": 1080
-  },
-  "files": [
-    {
-      "name": "photo.jpg",
-      "size": 2048000,
-      "type": "image/jpeg",
-      "url": "https://example.public.blob.vercel-storage.com/uploads/photo.jpg",
-      "downloadUrl": "https://example.public.blob.vercel-storage.com/uploads/photo.jpg",
-      "pathname": "uploads/photo.jpg"
-    }
-  ]
-}
+```bash
+pnpm install
+pnpm dev
 ```
 
-字段说明：
+默认访问：`http://localhost:4000`
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `quality` | number | 压缩质量，范围 1-100，默认 80 |
-| `imageFormat` | string | 图片输出格式，支持 `webp`、`jpeg`、`png`、`avif` |
-| `imageResize` | object | 可选图片尺寸限制，支持 `maxWidth`、`maxHeight` |
-| `files` | array | 已上传到 Vercel Blob 的文件列表，最多 20 个 |
+## 鉴权接口
 
-默认 IP 限流：每小时 20 次压缩请求，可通过 `COMPRESS_RATE_LIMIT` 调整。
+- `POST /api/auth/register`：注册并发送邮箱验证邮件
+- `GET /api/auth/verify-email?token=...`：邮箱验证
+- `POST /api/auth/login`：登录并写入 Session Cookie
+- `POST /api/auth/logout`：退出登录
+- `GET /api/auth/me`：获取当前登录用户
 
-响应示例：
+## 页面路由
 
-```json
-{
-  "success": true,
-  "results": [
-    {
-      "mediaType": "image",
-      "originalName": "photo.jpg",
-      "originalSize": 2048000,
-      "compressedSize": 512000,
-      "compressionRatio": "75.0",
-      "width": 1920,
-      "height": 1080,
-      "outputFilename": "photo.webp",
-      "outputFormat": "webp",
-      "url": "https://example.public.blob.vercel-storage.com/compressed/photo.webp",
-      "downloadUrl": "https://example.public.blob.vercel-storage.com/compressed/photo.webp",
-      "expiresInHours": 24
-    }
-  ]
-}
-```
+- `/`：压缩主页面（未登录会自动重定向到 `/login`）
+- `/login`：登录页面
+- `/register`：注册页面
 
-### GET/POST `/api/cleanup`
+## 受保护接口
 
-清理 `uploads/` 和 `compressed/` 目录下超过 24 小时的 Blob 文件。`vercel.json` 已配置每日 0 点自动调用。
+以下接口需要登录后访问：
 
-响应示例：
-
-```json
-{
-  "success": true,
-  "deletedCount": 2,
-  "deleted": [
-    "uploads/example.jpg",
-    "compressed/example.webp"
-  ]
-}
-```
+- `POST /api/upload`
+- `POST /api/compress`
+- `GET /api/history`
+- `DELETE /api/history`
+- `GET /api/cleanup`
+- `POST /api/cleanup`
 
 ## 压缩记录
 
-每次压缩完成后，服务端会将记录追加到 Vercel Blob 中的 `compression-records.md`，包括时间、IP、媒体类型、文件名、压缩前大小、压缩后大小和压缩率。
-
-## 注意事项
-
-- 前端通过 CDN 引入 `@vercel/blob/client`，网络不可用时会影响上传功能。
-- 图片最大处理大小为 50MB，视频最大处理大小为 100MB。
-- `api/compress.js` 当前配置为 60 秒超时、1024MB 内存；大视频可能受 Serverless 超时或内存限制影响。
-- 公开部署时建议增加鉴权、限流和更严格的隐私处理。
+每次压缩完成后，服务端会将记录写入 OSS 的 `compression-records.md`。
+同时，用户维度的上传/压缩历史会写入 NeonDB 的 `auth_media_history` 表，并由前端从 `/api/history` 拉取展示。

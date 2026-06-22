@@ -1,9 +1,16 @@
+require('dotenv').config();
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const compressHandler = require('./api/compress');
 const uploadHandler = require('./api/upload');
 const cleanupHandler = require('./api/cleanup');
+const registerHandler = require('./api/auth/register');
+const verifyEmailHandler = require('./api/auth/verify-email');
+const loginHandler = require('./api/auth/login');
+const logoutHandler = require('./api/auth/logout');
+const meHandler = require('./api/auth/me');
+const historyHandler = require('./api/history');
 
 const PORT = process.env.PORT || 4000;
 
@@ -13,8 +20,18 @@ const mimeTypes = {
   '.css': 'text/css',
   '.js': 'application/javascript',
   '.json': 'application/json',
+  '.webp': 'image/webp',
+  '.avif': 'image/avif',
+  '.gif': 'image/gif',
+  '.bmp': 'image/bmp',
+  '.tiff': 'image/tiff',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.mov': 'video/quicktime',
+  '.avi': 'video/x-msvideo',
   '.svg': 'image/svg+xml',
 };
 
@@ -25,6 +42,12 @@ const server = http.createServer((req, res) => {
     '/api/compress': compressHandler,
     '/api/upload': uploadHandler,
     '/api/cleanup': cleanupHandler,
+    '/api/auth/register': registerHandler,
+    '/api/auth/verify-email': verifyEmailHandler,
+    '/api/auth/login': loginHandler,
+    '/api/auth/logout': logoutHandler,
+    '/api/auth/me': meHandler,
+    '/api/history': historyHandler,
   };
   const handler = apiRoutes[requestPath];
 
@@ -42,7 +65,15 @@ const server = http.createServer((req, res) => {
   }
 
   // 静态文件服务
-  let filePath = path.join(__dirname, 'public', req.url === '/' ? 'index.html' : req.url);
+  const staticRouteAliases = {
+    '/': '/index.html',
+    '/login': '/login.html',
+    '/login/': '/login.html',
+    '/register': '/register.html',
+    '/register/': '/register.html',
+  };
+  const staticPath = staticRouteAliases[requestPath] || requestPath;
+  let filePath = path.join(__dirname, 'public', staticPath);
   const ext = path.extname(filePath);
 
   if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {

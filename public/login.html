@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>登录 - 图片/视频压缩工具</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      min-height: 100vh;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      display: grid;
+      place-items: center;
+      padding: 16px;
+    }
+    .checking-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: grid;
+      place-items: center;
+      background: rgba(17, 24, 39, 0.38);
+      backdrop-filter: blur(2px);
+      transition: opacity 0.2s ease, visibility 0.2s ease;
+    }
+    .checking-overlay.hidden {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+    .checking-card {
+      width: min(340px, calc(100vw - 32px));
+      border-radius: 14px;
+      background: #fff;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.22);
+      padding: 22px 18px;
+      text-align: center;
+    }
+    .checking-spinner {
+      width: 40px;
+      height: 40px;
+      margin: 0 auto 10px;
+      border-radius: 50%;
+      border: 4px solid #e5e7eb;
+      border-top-color: #6366f1;
+      animation: spin 0.9s linear infinite;
+    }
+    .checking-title {
+      color: #111827;
+      font-size: 0.98rem;
+      font-weight: 700;
+    }
+    .checking-desc {
+      color: #6b7280;
+      font-size: 0.84rem;
+      margin-top: 6px;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .card {
+      width: 100%;
+      max-width: 420px;
+      background: #fff;
+      border-radius: 14px;
+      padding: 24px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+    }
+    h1 {
+      font-size: 1.4rem;
+      color: #111827;
+      margin-bottom: 6px;
+    }
+    .subtitle {
+      color: #6b7280;
+      font-size: 0.9rem;
+      margin-bottom: 16px;
+    }
+    .form {
+      display: grid;
+      gap: 12px;
+    }
+    input {
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 0.95rem;
+      color: #111827;
+    }
+    button {
+      border: none;
+      border-radius: 8px;
+      padding: 11px 14px;
+      font-weight: 600;
+      cursor: pointer;
+      color: #fff;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    .message {
+      margin-top: 12px;
+      min-height: 20px;
+      font-size: 0.88rem;
+      color: #6b7280;
+    }
+    .message.error { color: #b91c1c; }
+    .links {
+      margin-top: 14px;
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 0.88rem;
+    }
+    a { color: #4f46e5; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="checking-overlay" id="checkingOverlay">
+    <div class="checking-card">
+      <div class="checking-spinner"></div>
+      <div class="checking-title">身份验证中</div>
+      <div class="checking-desc">正在检查登录状态，请稍候...</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h1>登录账号</h1>
+    <p class="subtitle">登录后即可使用上传与压缩功能</p>
+    <form class="form" id="loginForm">
+      <input id="email" type="email" placeholder="邮箱" autocomplete="email" required>
+      <input id="password" type="password" placeholder="密码" autocomplete="current-password" required>
+      <button id="submitBtn" type="submit">登录</button>
+    </form>
+    <p class="message" id="message"></p>
+    <div class="links">
+      <a href="/register">去注册</a>
+      <a href="/">返回首页</a>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('loginForm');
+    const emailInput = document.getElementById('email');
+    const passwordInput = document.getElementById('password');
+    const submitBtn = document.getElementById('submitBtn');
+    const message = document.getElementById('message');
+    const checkingOverlay = document.getElementById('checkingOverlay');
+    const params = new URLSearchParams(window.location.search);
+    const nextRaw = params.get('next') || '/';
+    const nextPath = nextRaw.startsWith('/') ? nextRaw : '/';
+    const normalizedNextPath = nextPath.startsWith('/login') || nextPath.startsWith('/register')
+      ? '/'
+      : nextPath;
+
+    function setMessage(text, isError = false) {
+      message.textContent = text || '';
+      message.classList.toggle('error', Boolean(isError));
+    }
+
+    function setCheckingVisible(visible) {
+      checkingOverlay.classList.toggle('hidden', !visible);
+    }
+
+    async function checkCurrentUser() {
+      try {
+        const response = await fetch('/api/auth/me');
+        if (response.ok) {
+          window.location.replace(normalizedNextPath);
+          return;
+        }
+      } catch (error) {
+        // ignore
+      }
+      setCheckingVisible(false);
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const email = emailInput.value.trim();
+      const password = passwordInput.value;
+      if (!email || !password) {
+        setMessage('请输入邮箱和密码。', true);
+        return;
+      }
+
+      submitBtn.disabled = true;
+      setMessage('登录中...');
+      try {
+        const response = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data.error || '登录失败');
+        }
+        setMessage('登录成功，正在跳转...');
+        window.location.replace(normalizedNextPath);
+      } catch (error) {
+        setMessage(error.message || '登录失败', true);
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+
+    checkCurrentUser();
+  </script>
+</body>
+</html>
