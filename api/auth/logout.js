@@ -1,4 +1,4 @@
-const { clearSessionCookie, destroySession, readSessionIdFromRequest } = require('../session');
+const { clearSessionCookie, destroySession, readSessionIdFromRequest } = require('../../lib/session');
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {

@@ -1,7 +1,7 @@
-const { applyRateLimitHeaders, checkRateLimit } = require('../rate-limit');
-const { authenticateUser } = require('../auth-service');
-const { readJsonBody } = require('../http-utils');
-const { createSession, setSessionCookie } = require('../session');
+const { applyRateLimitHeaders, checkRateLimit } = require('../../lib/rate-limit');
+const { authenticateUser } = require('../../lib/auth-service');
+const { readJsonBody } = require('../../lib/http-utils');
+const { createSession, setSessionCookie } = require('../../lib/session');
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {

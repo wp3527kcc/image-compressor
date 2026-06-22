@@ -5,9 +5,9 @@ const sharp = require('sharp');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
 const { cleanupExpiredImages } = require('./cleanup');
-const { applyRateLimitHeaders, checkRateLimit } = require('./rate-limit');
-const { requireAuth } = require('./require-auth');
-const { addCompressionHistory } = require('./history-service');
+const { applyRateLimitHeaders, checkRateLimit } = require('../lib/rate-limit');
+const { requireAuth } = require('../lib/require-auth');
+const { addCompressionHistory } = require('../lib/history-service');
 const {
   MAX_MEDIA_AGE_HOURS,
   buildObjectKey,
@@ -15,7 +15,7 @@ const {
   getOssClient,
   getPublicUrlByKey,
   sanitizeObjectName,
-} = require('./oss');
+} = require('../lib/oss');
 
 const RECORD_LOCK_KEY = 'compression-records:lock';
 const RECORD_LOCK_TTL_SECONDS = 10;

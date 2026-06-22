@@ -1,5 +1,5 @@
-const { ALLOWED_PREFIXES, MAX_MEDIA_AGE_MS, getOssClient } = require('./oss');
-const { requireAuth } = require('./require-auth');
+const { ALLOWED_PREFIXES, MAX_MEDIA_AGE_MS, getOssClient } = require('../lib/oss');
+const { requireAuth } = require('../lib/require-auth');
 
 function isCronAuthorized(req) {
   const cronSecret = String(process.env.CRON_SECRET || '').trim();

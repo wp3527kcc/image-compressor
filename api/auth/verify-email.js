@@ -1,4 +1,4 @@
-const { verifyEmailToken } = require('../auth-service');
+const { verifyEmailToken } = require('../../lib/auth-service');
 
 function getAppBaseUrl(req) {
   const configured = String(process.env.APP_BASE_URL || '').trim().replace(/\/+$/, '');

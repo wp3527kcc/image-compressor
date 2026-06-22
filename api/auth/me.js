@@ -1,4 +1,4 @@
-const { resolveAuthUser } = require('../require-auth');
+const { resolveAuthUser } = require('../../lib/require-auth');
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'GET') {

@@ -1,8 +1,8 @@
 const path = require('path');
-const { applyRateLimitHeaders, checkRateLimit } = require('./rate-limit');
-const { buildObjectKey, getOssClient, getPublicUrlByKey } = require('./oss');
-const { requireAuth } = require('./require-auth');
-const { addUploadHistory } = require('./history-service');
+const { applyRateLimitHeaders, checkRateLimit } = require('../lib/rate-limit');
+const { buildObjectKey, getOssClient, getPublicUrlByKey } = require('../lib/oss');
+const { requireAuth } = require('../lib/require-auth');
+const { addUploadHistory } = require('../lib/history-service');
 
 const ALLOWED_CONTENT_TYPES = [
   'image/jpeg',

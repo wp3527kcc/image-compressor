@@ -1,6 +1,6 @@
-const { applyRateLimitHeaders, checkRateLimit } = require('../rate-limit');
-const { registerUser } = require('../auth-service');
-const { readJsonBody } = require('../http-utils');
+const { applyRateLimitHeaders, checkRateLimit } = require('../../lib/rate-limit');
+const { registerUser } = require('../../lib/auth-service');
+const { readJsonBody } = require('../../lib/http-utils');
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {

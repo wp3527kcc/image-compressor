@@ -1,5 +1,5 @@
-const { requireAuth } = require('./require-auth');
-const { clearUserHistory, listUserHistory } = require('./history-service');
+const { requireAuth } = require('../lib/require-auth');
+const { clearUserHistory, listUserHistory } = require('../lib/history-service');
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'DELETE') {
