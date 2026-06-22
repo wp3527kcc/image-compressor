@@ -1,7 +1,15 @@
-const path = require('path');
+/**
+ * /api/upload — Edge Function
+ *
+ * 运行在 Vercel Edge Runtime（离用户最近的节点），将浏览器上传的文件
+ * 通过 fetch 流式代理到阿里云 OSS，彻底绕过浏览器跨域限制，
+ * 同时避免 Serverless Function 的冷启动延迟和带宽瓶颈。
+ *
+ * 不依赖任何 Node.js 内置模块，全程使用 Web API。
+ */
+
+const { buildObjectKey, getPublicUrlByKey, putObjectToOss } = require('../lib/oss-edge');
 const { applyRateLimitHeaders, checkRateLimit } = require('../lib/rate-limit');
-const { buildObjectKey, getOssClient, getPublicUrlByKey } = require('../lib/oss');
-const { requireAuth } = require('../lib/require-auth');
 const { addUploadHistory } = require('../lib/history-service');
 
 const ALLOWED_CONTENT_TYPES = [
@@ -17,7 +25,62 @@ const ALLOWED_CONTENT_TYPES = [
   'video/x-msvideo',
 ];
 const MAX_UPLOAD_SIZE = 100 * 1024 * 1024;
-const MAX_REQUEST_SIZE = MAX_UPLOAD_SIZE + 512 * 1024;
+
+// ── Session / Auth（纯 Web API，不依赖 lib/session.js 的 Node.js crypto）──
+
+const SESSION_COOKIE_NAME = 'session_id';
+const SESSION_KEY_PREFIX = 'sess:image-compressor:';
+
+function parseCookiesFromHeader(cookieHeader) {
+  if (!cookieHeader) return {};
+  return Object.fromEntries(
+    cookieHeader.split(';')
+      .map(pair => {
+        const idx = pair.indexOf('=');
+        if (idx <= 0) return null;
+        return [pair.slice(0, idx).trim(), decodeURIComponent(pair.slice(idx + 1).trim())];
+      })
+      .filter(Boolean)
+  );
+}
+
+async function getSessionFromRedis(sessionId) {
+  const url = String(process.env.UPSTASH_REDIS_REST_URL || '').replace(/\/+$/, '');
+  const token = String(process.env.UPSTASH_REDIS_REST_TOKEN || '');
+  if (!url || !token) throw new Error('缺少 Redis 会话配置');
+
+  const key = `${SESSION_KEY_PREFIX}${sessionId}`;
+  const res = await fetch(`${url}/${['GET', key].map(encodeURIComponent).join('/')}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`Redis 请求失败: ${res.status}`);
+  const data = await res.json();
+  const raw = data?.result;
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return null; }
+}
+
+async function resolveUser(request) {
+  const cookieHeader = request.headers.get('cookie') || '';
+  const sessionId = String(parseCookiesFromHeader(cookieHeader)[SESSION_COOKIE_NAME] || '').trim();
+  if (!sessionId) return null;
+  const session = await getSessionFromRedis(sessionId);
+  if (!session?.userId || !session?.emailVerifiedAt) return null;
+  return session;
+}
+
+// ── 文件名工具（不依赖 path 模块）────────────────────────────────────────
+
+function getFileExt(filename) {
+  const base = String(filename || '').split(/[\\/]/).pop() || '';
+  const dot = base.lastIndexOf('.');
+  return dot >= 0 ? base.slice(dot).slice(0, 12).toLowerCase() : '';
+}
+
+function getBasename(filename) {
+  return String(filename || 'file').split(/[\\/]/).pop() || 'file';
+}
+
 function sanitizeFilename(value) {
   return String(value || 'file')
     .normalize('NFKC')
@@ -28,151 +91,108 @@ function sanitizeFilename(value) {
     .slice(0, 120) || 'file';
 }
 
-function getHeader(contentType) {
-  if (Array.isArray(contentType)) return contentType[0] || '';
-  return String(contentType || '');
-}
+// ── Response 工具 ─────────────────────────────────────────────────────────
 
-function parseBoundary(contentType) {
-  const match = getHeader(contentType).match(/boundary=(?:"([^"]+)"|([^;]+))/i);
-  return match?.[1] || match?.[2] || null;
-}
-
-function parseMultipartBody(buffer, boundary) {
-  const boundaryBuffer = Buffer.from(`--${boundary}`);
-  const headerSeparator = Buffer.from('\r\n\r\n');
-  let cursor = buffer.indexOf(boundaryBuffer);
-  if (cursor === -1) {
-    throw new Error('无法解析上传内容');
-  }
-
-  while (cursor !== -1) {
-    let partStart = cursor + boundaryBuffer.length;
-    const isFinal = buffer[partStart] === 45 && buffer[partStart + 1] === 45;
-    if (isFinal) break;
-
-    if (buffer[partStart] === 13 && buffer[partStart + 1] === 10) {
-      partStart += 2;
-    }
-    const nextBoundaryIndex = buffer.indexOf(boundaryBuffer, partStart);
-    if (nextBoundaryIndex === -1) break;
-
-    const part = buffer.slice(partStart, nextBoundaryIndex - 2);
-    const headerEnd = part.indexOf(headerSeparator);
-    if (headerEnd === -1) {
-      cursor = nextBoundaryIndex;
-      continue;
-    }
-
-    const headerText = part.slice(0, headerEnd).toString('utf8');
-    const content = part.slice(headerEnd + headerSeparator.length);
-    const disposition = headerText.match(/content-disposition:[^\r\n]*/i)?.[0] || '';
-    const fieldName = disposition.match(/name="([^"]+)"/i)?.[1] || '';
-    const filename = disposition.match(/filename="([^"]*)"/i)?.[1] || '';
-    const contentType = headerText.match(/content-type:\s*([^\r\n]+)/i)?.[1]?.trim() || '';
-
-    if (filename && fieldName === 'file') {
-      return {
-        filename,
-        contentType,
-        buffer: content,
-      };
-    }
-
-    cursor = nextBoundaryIndex;
-  }
-
-  throw new Error('未找到上传文件字段');
-}
-
-function readMultipartBody(req) {
-  const boundary = parseBoundary(req.headers['content-type']);
-  if (!boundary) {
-    throw new Error('仅支持 multipart/form-data 上传');
-  }
-
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    let totalSize = 0;
-
-    req.on('data', chunk => {
-      totalSize += chunk.length;
-      if (totalSize > MAX_REQUEST_SIZE) {
-        reject(new Error(`上传文件不能超过 ${Math.floor(MAX_UPLOAD_SIZE / (1024 * 1024))}MB`));
-        req.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-
-    req.on('end', () => {
-      try {
-        const bodyBuffer = Buffer.concat(chunks);
-        const parsed = parseMultipartBody(bodyBuffer, boundary);
-        resolve(parsed);
-      } catch (error) {
-        reject(error);
-      }
-    });
-    req.on('error', reject);
+function json(data, status = 200, extraHeaders = {}) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json', ...extraHeaders },
   });
 }
 
-module.exports = async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: '仅支持 POST 请求' });
+// ── rate-limit 适配（lib/rate-limit.js 期望 Node.js req/res 风格）─────────
+
+function makeRateLimitReq(request) {
+  return {
+    headers: {
+      'x-forwarded-for': request.headers.get('x-forwarded-for') || '',
+      'x-real-ip': request.headers.get('x-real-ip') || '',
+    },
+    socket: {},
+  };
+}
+
+function makeRateLimitRes() {
+  const headers = {};
+  return {
+    _extra: headers,
+    setHeader(name, value) { headers[name] = String(value); },
+    getHeader(name) { return headers[name]; },
+  };
+}
+
+// ── 主处理器 ──────────────────────────────────────────────────────────────
+
+async function handler(request) {
+  if (request.method !== 'POST') {
+    return json({ error: '仅支持 POST 请求' }, 405);
   }
 
   try {
-    const user = await requireAuth(req, res);
-    if (!user) return;
+    // 1. 鉴权
+    const session = await resolveUser(request);
+    if (!session) return json({ error: '请先登录后再操作' }, 401);
 
-    const rateLimit = await checkRateLimit(req, 'upload');
-    applyRateLimitHeaders(res, rateLimit);
+    // 2. 限流
+    const rlReq = makeRateLimitReq(request);
+    const rlRes = makeRateLimitRes();
+    const rateLimit = await checkRateLimit(rlReq, 'upload');
+    applyRateLimitHeaders(rlRes, rateLimit);
     if (rateLimit.limited) {
-      return res.status(429).json({ error: '上传请求过于频繁，请稍后再试' });
+      return json({ error: '上传请求过于频繁，请稍后再试' }, 429, rlRes._extra);
     }
 
-    const upload = await readMultipartBody(req);
-    if (!upload.buffer || upload.buffer.length === 0) {
-      return res.status(400).json({ error: '上传文件不能为空' });
+    // 3. 解析 multipart/form-data（Web API 原生支持）
+    let formData;
+    try {
+      formData = await request.formData();
+    } catch {
+      return json({ error: '仅支持 multipart/form-data 上传' }, 400);
     }
-    if (!ALLOWED_CONTENT_TYPES.includes(upload.contentType)) {
-      return res.status(400).json({ error: '不支持的文件类型' });
-    }
-    if (upload.buffer.length > MAX_UPLOAD_SIZE) {
-      return res.status(400).json({ error: `上传文件不能超过 ${Math.floor(MAX_UPLOAD_SIZE / (1024 * 1024))}MB` });
+    const file = formData.get('file');
+    if (!file || typeof file === 'string') {
+      return json({ error: '未找到上传文件字段' }, 400);
     }
 
-    const ext = path.extname(upload.filename || '').slice(0, 12).toLowerCase();
-    const safeName = sanitizeFilename(path.basename(upload.filename || 'upload'));
+    // 4. 校验
+    const contentType = file.type || '';
+    const size = file.size || 0;
+    if (!ALLOWED_CONTENT_TYPES.includes(contentType)) {
+      return json({ error: '不支持的文件类型' }, 400);
+    }
+    if (size === 0) return json({ error: '上传文件不能为空' }, 400);
+    if (size > MAX_UPLOAD_SIZE) {
+      return json({ error: `文件不能超过 ${Math.floor(MAX_UPLOAD_SIZE / (1024 * 1024))}MB` }, 400);
+    }
+
+    // 5. 构建对象键
+    const filename = file.name || 'upload';
+    const ext = getFileExt(filename);
+    const safeName = sanitizeFilename(getBasename(filename));
     const outputName = `${safeName}${ext && !safeName.endsWith(ext) ? ext : ''}`;
     const objectKey = buildObjectKey('compressor/uploadFiles/', outputName);
-    const client = getOssClient();
-    await client.put(objectKey, upload.buffer, {
-      mime: upload.contentType,
-      headers: {
-        'Content-Type': upload.contentType,
-        'Cache-Control': 'public, max-age=86400',
-      },
-    });
 
-    const fileUrl = getPublicUrlByKey(objectKey);
+    // 6. 读取文件内容并上传到 OSS（Edge 节点 → OSS，绕过浏览器跨域）
+    const fileBuffer = await file.arrayBuffer();
+    const fileUrl = await putObjectToOss({ objectKey, body: fileBuffer, contentType });
+
+    // 7. 记录历史
     const uploadedFile = {
-      name: upload.filename || outputName,
-      size: upload.buffer.length,
-      type: upload.contentType,
+      name: filename,
+      size,
+      type: contentType,
       url: fileUrl,
       downloadUrl: fileUrl,
       pathname: objectKey,
     };
-    await addUploadHistory(user.id, uploadedFile);
+    await addUploadHistory(session.userId, uploadedFile);
 
-    res.status(200).json({
-      success: true,
-      file: uploadedFile,
-    });
+    return json({ success: true, file: uploadedFile }, 200, rlRes._extra);
   } catch (error) {
-    res.status(400).json({ error: error.message || '文件上传失败' });
+    console.error('[upload] error:', error?.message);
+    return json({ error: error?.message || '文件上传失败' }, 500);
   }
-};
+}
+
+module.exports = handler;
+module.exports.config = { runtime: 'edge' };

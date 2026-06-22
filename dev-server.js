@@ -3,7 +3,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const compressHandler = require('./api/compress');
-const uploadHandler = require('./api/upload');
+const uploadHandler = require('./api/upload');   // Edge Function（Web API 风格）
 const cleanupHandler = require('./api/cleanup');
 const registerHandler = require('./api/auth/register');
 const verifyEmailHandler = require('./api/auth/verify-email');
@@ -13,6 +13,43 @@ const meHandler = require('./api/auth/me');
 const historyHandler = require('./api/history');
 
 const PORT = process.env.PORT || 4000;
+
+/**
+ * Edge Function 适配器
+ * 将 Node.js IncomingMessage/ServerResponse 转换为 Web API Request/Response，
+ * 以便在本地开发时运行声明了 { runtime: 'edge' } 的 handler。
+ */
+async function callEdgeHandler(edgeHandler, req, res) {
+  const protocol = 'http';
+  const host = req.headers.host || `localhost:${PORT}`;
+  const url = `${protocol}://${host}${req.url}`;
+
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  const bodyBuffer = Buffer.concat(chunks);
+
+  const webRequest = new Request(url, {
+    method: req.method,
+    headers: new Headers(
+      Object.fromEntries(
+        Object.entries(req.headers).filter(([, v]) => typeof v === 'string')
+      )
+    ),
+    body: req.method !== 'GET' && req.method !== 'HEAD' && bodyBuffer.length > 0
+      ? bodyBuffer
+      : undefined,
+    // duplex 在 Node.js 18 fetch 中需要显式声明（流式 body）
+    ...(req.method !== 'GET' && req.method !== 'HEAD' && bodyBuffer.length > 0
+      ? { duplex: 'half' } : {}),
+  });
+
+  const webResponse = await edgeHandler(webRequest);
+
+  res.statusCode = webResponse.status;
+  webResponse.headers.forEach((value, name) => res.setHeader(name, value));
+  const resBody = await webResponse.arrayBuffer();
+  res.end(Buffer.from(resBody));
+}
 
 // MIME 类型映射
 const mimeTypes = {
@@ -38,9 +75,14 @@ const mimeTypes = {
 const server = http.createServer((req, res) => {
   // API 路由
   const requestPath = new URL(req.url, `http://${req.headers.host || 'localhost'}`).pathname;
-  const apiRoutes = {
+  // Edge Function 路由（返回 Web API Response 对象）
+  if (requestPath === '/api/upload') {
+    return callEdgeHandler(uploadHandler, req, res);
+  }
+
+  // 标准 Serverless Function 路由（Node.js req/res 风格）
+  const serverlessRoutes = {
     '/api/compress': compressHandler,
-    '/api/upload': uploadHandler,
     '/api/cleanup': cleanupHandler,
     '/api/auth/register': registerHandler,
     '/api/auth/verify-email': verifyEmailHandler,
@@ -49,14 +91,10 @@ const server = http.createServer((req, res) => {
     '/api/auth/me': meHandler,
     '/api/history': historyHandler,
   };
-  const handler = apiRoutes[requestPath];
+  const handler = serverlessRoutes[requestPath];
 
   if (handler) {
-    // 模拟 Vercel 的 res.status().json() 方法
-    res.status = (code) => {
-      res.statusCode = code;
-      return res;
-    };
+    res.status = (code) => { res.statusCode = code; return res; };
     res.json = (data) => {
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify(data));
